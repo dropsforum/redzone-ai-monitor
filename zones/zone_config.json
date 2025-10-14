@@ -1,0 +1,75 @@
+{
+  "settings": {
+    "camera_index": 0,
+    "camera_width": 640,
+    "camera_height": 480,
+    "camera_fps": 15,
+    "model_size": "yolov8n.pt",
+    "confidence_threshold": 0.5,
+    "alert_cooldown": 5,
+    "detection_classes": [
+      "person"
+    ],
+    "zone_overlay_alpha": 0.3,
+    "zone_color": [
+      0,
+      255,
+      0
+    ],
+    "alert_zone_color": [
+      0,
+      0,
+      255
+    ],
+    "bbox_color": [
+      255,
+      0,
+      0
+    ],
+    "alert_min_overlap": 0.15,
+    "alert_activation_frames": 3,
+    "show_debug": true
+  },
+  "zone_points": [
+    [
+      122,
+      35
+    ],
+    [
+      432,
+      36
+    ],
+    [
+      438,
+      290
+    ],
+    [
+      103,
+      293
+    ],
+    [
+      228,
+      168
+    ],
+    [
+      313,
+      136
+    ],
+    [
+      208,
+      116
+    ],
+    [
+      156,
+      168
+    ],
+    [
+      194,
+      68
+    ],
+    [
+      121,
+      36
+    ]
+  ]
+}

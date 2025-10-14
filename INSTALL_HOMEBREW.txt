@@ -1,0 +1,37 @@
+====================================================================
+HOMEBREW INSTALLATION COMMAND
+====================================================================
+
+Copy and paste this command into Terminal:
+
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+====================================================================
+
+STEPS:
+
+1. Open Terminal.app (Applications > Utilities > Terminal)
+
+2. Copy the command above and paste into Terminal
+
+3. Press ENTER
+
+4. Enter your password when prompted
+
+5. Press RETURN to continue when asked
+
+6. After installation, you'll see instructions like:
+
+   echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+   eval "$(/opt/homebrew/bin/brew shellenv)"
+
+   Copy and run THOSE commands too!
+
+7. Close and reopen Terminal
+
+8. Come back to Cursor and let me know it's done!
+
+====================================================================
+
+
+

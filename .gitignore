@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Motion build artifacts
+motion_build/
+motion_install/
+
+# Runtime files
+logs/
+*.log
+*.pid
+*.flag
+
+# Captures
+captures/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+
+# Config (keep template, ignore custom)
+config/motion.conf
+config/zones/*.png
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Distribution
+*.dmg
+*.pkg
+installer/
+
+# Temporary files
+tmp/
+temp/
+
+
