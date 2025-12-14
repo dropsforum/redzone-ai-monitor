@@ -69,7 +69,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     name="DROPS Red Zone Monitoring",
-    console=False,  # Windowed mode (no console)
+    console=True,  # Show console for debugging (change to False for release)
     disable_windowed_traceback=False,
     icon=None,  # Provide packaging/windows/icon.ico if available
     version=None,  # Provide version info file if available
