@@ -1,129 +1,145 @@
-# Motion Detection Mac App
+# DROPS Red Zone Monitoring
 
-A macOS application that uses Motion software to detect objects entering specific camera zones with manual activation and notifications.
+A cross-platform application (macOS and Windows) that uses AI (YOLOv8) to detect people entering user-defined zones with audible alerts.
 
 ## Features
 
-- Manual start/stop control via menu bar
-- Zone-based motion detection (detect only in specific camera areas)
-- macOS notifications when motion detected
-- Live camera feed viewing via web interface
-- Works with Logitech and other USB cameras
+✅ **AI-Powered Detection** - Uses YOLOv8 to accurately detect people (not just pixel changes)  
+✅ **Custom Zone Drawing** - Draw any polygon shape to monitor specific areas  
+✅ **Visual Interface** - Live camera feed with on-screen controls  
+✅ **Audible Alerts** - System sound plays when person enters your zone  
+✅ **Alert Cooldown** - Prevents alert spam (configurable)  
+✅ **Zone Persistence** - Saves your zones between sessions  
+✅ **Performance Optimized** - Runs smoothly on Apple Silicon (80-120 FPS) and modern Windows PCs  
+✅ **Recorded Footage Support** - Replay saved videos with full detection features
 
-## Installation (Development)
+## Quick Start
 
-### Prerequisites
+### macOS
 
-This installation requires administrator privileges on your Mac.
+1. **Install dependencies:**
+   ```bash
+   ./scripts/setup_dependencies.sh
+   ```
 
-### Step 1: Install Homebrew (if not already installed)
+2. **Run the application:**
+   ```bash
+   source venv/bin/activate
+   python3 run_ai_app.py
+   ```
 
-Run this command in Terminal:
+### Windows
 
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
+1. **Install dependencies:**
+   ```powershell
+   .\scripts\setup_dependencies.ps1
+   ```
+   Or if PowerShell is not available:
+   ```cmd
+   scripts\setup_dependencies.bat
+   ```
 
-After installation, follow the prompts to add Homebrew to your PATH.
+2. **Run the application:**
+   ```powershell
+   .\venv\Scripts\Activate.ps1
+   python run_ai_app.py
+   ```
 
-### Step 2: Run the Setup Script
+### Easiest Windows build (recommended)
 
-```bash
-cd "/Volumes/Data Vault/Cursor 2/Motion"
-chmod +x setup_dependencies.sh
-./setup_dependencies.sh
-```
+If you just want a Windows `.exe` without setting up a Windows build environment, GitHub can build it for you:
 
-This will:
-- Install required system dependencies (ffmpeg, libmicrohttpd, etc.)
-- Clone and build Motion from source
-- Install Python dependencies for the wrapper app
+1. Push your latest code to GitHub
+2. Open your repo on GitHub and click the **Actions** tab
+3. Click **Build Windows EXE**
+4. Click **Run workflow**
+5. When it finishes, download the artifact **DROPS-Red-Zone-Monitoring-Windows** and unzip it
+6. Run `DROPS Red Zone Monitoring.exe`
 
-### Step 3: Test the Installation
+### Using the Application
 
-```bash
-python3 test_camera.py
-```
+3. **Draw your zone:** Press `D`, click points, press `ENTER`
 
-This will list available cameras and test Motion configuration.
+4. **Start monitoring:** Press `S`
 
-## Usage
+For detailed instructions, see [docs/INSTALLATION.md](docs/INSTALLATION.md) and [docs/USAGE.md](docs/USAGE.md).
 
-### Start the Menu Bar App
+## System Requirements
 
-```bash
-python3 motion_app.py
-```
+### macOS
+- **macOS** 10.15 or later
+- **Python 3.9+**
+- **Apple Silicon** (M1/M2/M3/M4) recommended, or Intel i5+
+- **Camera** (USB webcam or built-in)
+- **~1GB disk space**
 
-The app icon will appear in your menu bar. Click it to:
-- Start/Stop motion detection
-- View camera feed
-- Access settings
-- View recent alerts
+### Windows
+- **Windows** 10 or later
+- **Python 3.9+**
+- **CPU**: Intel i5 or AMD equivalent (modern multi-core recommended)
+- **RAM**: 4GB minimum, 8GB+ recommended
+- **Camera**: USB webcam or built-in camera
+- **~1GB disk space**
 
-### Configure Detection Zone
+## Documentation
 
-1. Start the app and click "Start Monitoring"
-2. Open the web interface (http://localhost:8080)
-3. View the camera feed and note the areas you want to monitor
-4. Stop monitoring and edit `config/motion.conf`
-5. Set up the mask/zone for your specific detection area
+- **[Installation Guide](docs/INSTALLATION.md)** - Complete installation instructions
+- **[User Guide](docs/USAGE.md)** - How to use the application
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## Project Structure
 
 ```
-Motion/
+redzone-ai-monitor/
 ├── README.md                   # This file
-├── setup_dependencies.sh       # Install system dependencies
-├── build_motion.sh            # Build Motion from source
-├── motion_app.py              # Main menu bar application
-├── motion_manager.py          # Motion process management
-├── notification_handler.py    # macOS notifications
-├── event_listener.py          # Motion event monitoring
-├── requirements.txt           # Python dependencies
-├── config/
-│   ├── motion.conf           # Motion configuration
-│   └── zones/                # Zone mask images
-├── motion_build/             # Motion source code (git clone)
-├── logs/                     # Application logs
-└── captures/                 # Motion detection captures
-
+├── LICENSE                     # MIT License
+├── requirements_ai.txt         # Python dependencies
+├── run_ai_app.py              # Main application entry point
+├── ai_motion_app/             # Application source code
+│   ├── main_app.py            # Main application
+│   ├── camera_manager.py      # Camera handling
+│   ├── ai_detector.py         # YOLO detection
+│   ├── zone_manager.py        # Zone polygon logic
+│   ├── alert_system.py        # Alert management
+│   └── config.py              # Configuration
+├── scripts/                    # Utility scripts
+│   ├── setup_dependencies.sh  # macOS setup script
+│   ├── setup_dependencies.ps1 # Windows PowerShell setup
+│   ├── setup_dependencies.bat # Windows batch setup
+│   └── ...
+├── packaging/                  # Platform-specific packaging
+│   ├── macos/                 # macOS packaging files
+│   └── windows/               # Windows packaging files
+├── docs/                       # Documentation
+│   ├── INSTALLATION.md        # Installation guide
+│   ├── USAGE.md               # User guide
+│   └── TROUBLESHOOTING.md     # Troubleshooting
+├── models/                     # AI model files
+│   └── yolov8n.pt             # YOLOv8 nano model
+├── zones/                      # Zone configuration
+│   └── zone_config.json       # User settings
+└── ...
 ```
 
-## Distribution Package
+## Keyboard Controls
 
-To create an installer for other Macs:
+| Key | Action |
+|-----|--------|
+| `D` | Enter zone drawing mode |
+| `ENTER` | Finish drawing zone |
+| `C` | Clear zone |
+| `S` | Start monitoring |
+| `P` | Pause/Resume |
+| `Q` or `ESC` | Quit |
 
-```bash
-./create_installer.sh
-```
+## License
 
-This creates a .pkg installer in the `dist/` directory.
+MIT License - see [LICENSE](LICENSE) file for details.
 
-## Troubleshooting
+**Important:** This software uses YOLOv8 from Ultralytics. Commercial use requires a separate commercial license from Ultralytics. See [LICENSE](LICENSE) for details.
 
-### Camera Permission Issues
+## Credits
 
-macOS requires explicit camera permissions. If the camera doesn't work:
-
-1. Go to System Settings > Privacy & Security > Camera
-2. Enable camera access for Terminal (during development) or the Motion app
-
-### Motion Not Detecting
-
-- Check camera connection: `ls /dev/video*`
-- Verify Motion is running: `ps aux | grep motion`
-- Check Motion logs: `tail -f logs/motion.log`
-
-### Port Already in Use
-
-If port 8080 is in use, edit `config/motion.conf` and change the `stream_port` value.
-
-## Technical Details
-
-- **Motion**: Open-source motion detection software
-- **Python App**: Menu bar interface using rumps library
-- **Notifications**: Native macOS notifications via osascript
-- **Camera Support**: V4L2-compatible cameras on macOS
-
-
+- **YOLOv8**: Ultralytics (https://github.com/ultralytics/ultralytics)
+- **OpenCV**: Open Source Computer Vision Library
+- **PyTorch**: Deep learning framework

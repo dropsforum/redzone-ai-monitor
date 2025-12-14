@@ -1,21 +1,22 @@
 # AI Motion Detection App Dependencies
+# Compatible with Python 3.9+
 
 # Computer Vision and AI
 opencv-python>=4.8.0
 ultralytics>=8.0.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0  # NumPy 2.x requires Python 3.11+
 
 # Audio for alerts
-pygame>=2.5.0
+pygame>=2.5.0  # Works with both pygame and pygame-ce
 
 # Image processing
-Pillow>=10.0.0
+Pillow>=10.0.0,<11.0  # Pillow 11.x requires Python 3.10+
 
 # Configuration
-pyyaml>=6.0
+pyyaml>=6.0.3
 
 # Utilities
-python-dateutil>=2.8.0
+python-dateutil>=2.9.0
 
 
 

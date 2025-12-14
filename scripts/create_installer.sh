@@ -75,7 +75,7 @@ echo -e "${YELLOW}Copying additional files...${NC}"
 
 cp -r dist/$APP_NAME.app "$DIST_DIR/app_bundle/"
 cp README.md "$DIST_DIR/app_bundle/"
-cp QUICKSTART.md "$DIST_DIR/app_bundle/"
+cp docs/QUICKSTART.md "$DIST_DIR/app_bundle/" 2>/dev/null || true
 
 # Create a post-install script
 cat > "$DIST_DIR/app_bundle/setup.sh" << 'EOF'

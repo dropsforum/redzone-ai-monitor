@@ -56,4 +56,13 @@ installer/
 tmp/
 temp/
 
+# Environment and secrets
+.env
+.env.local
+*.key
+*.pem
+secrets/
+
+# User-specific config (keep template in git, but ignore user modifications)
+# zones/zone_config.json is tracked as a template with empty zones
 

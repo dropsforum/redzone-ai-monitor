@@ -33,7 +33,7 @@ fi
 if [ ! -f "config/motion.conf" ]; then
     echo -e "${YELLOW}Warning: Configuration not found${NC}"
     echo "Creating default configuration..."
-    python3 create_config.py
+    python3 scripts/create_config.py
     echo ""
 fi
 

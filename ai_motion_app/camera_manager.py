@@ -5,12 +5,21 @@ Handles camera initialization and frame capture
 
 import cv2
 import numpy as np
+from pathlib import Path
 from typing import Optional, Tuple, List
 
 class CameraManager:
     """Manage camera capture and frame processing"""
     
-    def __init__(self, camera_index: int = 0, width: int = 640, height: int = 480, fps: int = 15):
+    def __init__(
+        self,
+        camera_index: int = 0,
+        width: int = 1280,
+        height: int = 720,
+        fps: int = 15,
+        source_type: str = "camera",
+        video_path: Optional[str] = None,
+    ):
         self.camera_index = camera_index
         self.width = width
         self.height = height
@@ -18,10 +27,56 @@ class CameraManager:
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_open = False
         self.available_cameras: List[int] = []
+        self.source_type = source_type if source_type in ("camera", "video") else "camera"
+        self.video_path = Path(video_path).expanduser() if video_path else None
+        self.total_frames: int = 0
+        self.current_frame_number: int = 0
         
     def start(self) -> bool:
         """Initialize and start camera capture"""
         try:
+            # Reset counters and close existing capture if any
+            if self.cap is not None:
+                self.cap.release()
+            self.cap = None
+            self.is_open = False
+            self.current_frame_number = 0
+            self.total_frames = 0
+
+            if self.source_type == "video":
+                if self.video_path is None:
+                    print("✗ Video source selected but no file path provided")
+                    return False
+                if not self.video_path.exists():
+                    print(f"✗ Video file not found: {self.video_path}")
+                    return False
+
+                self.cap = cv2.VideoCapture(str(self.video_path))
+                if not self.cap.isOpened():
+                    print(f"✗ Failed to open video file: {self.video_path}")
+                    return False
+
+                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                actual_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
+
+                if actual_width > 0:
+                    self.width = actual_width
+                if actual_height > 0:
+                    self.height = actual_height
+                if actual_fps > 0:
+                    self.fps = actual_fps
+
+                print(f"✓ Video source opened: {self.video_path}")
+                print(f"  Resolution: {self.width}x{self.height}")
+                if self.total_frames > 0:
+                    print(f"  Frames: {self.total_frames}")
+                print(f"  FPS: {self.fps:.2f}")
+
+                self.is_open = True
+                return True
+
             # Probe available cameras first for a better default
             if not self.available_cameras:
                 self.enumerate_cameras()
@@ -67,6 +122,10 @@ class CameraManager:
     def enumerate_cameras(self, max_devices: int = 8) -> List[int]:
         """Detect available camera indices by probing."""
         indices: List[int] = []
+        if self.source_type != "camera":
+            # Camera enumeration is irrelevant for video files
+            self.available_cameras = indices
+            return indices
         for idx in range(max_devices):
             cap = cv2.VideoCapture(idx)
             if cap is not None and cap.isOpened():
@@ -81,6 +140,9 @@ class CameraManager:
 
     def switch_camera(self, new_index: int) -> bool:
         """Switch to a different camera. Returns True if successful."""
+        if self.source_type != "camera":
+            print("⚠ Camera switching is disabled when using a video file source.")
+            return False
         if new_index == self.camera_index:
             return True
         previous_cap = self.cap
@@ -120,6 +182,17 @@ class CameraManager:
             return False, None
         
         ret, frame = self.cap.read()
+        if self.source_type == "video":
+            if not ret or frame is None:
+                # Loop back to start
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                self.current_frame_number = 0
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    return False, None
+            self.current_frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+        else:
+            self.current_frame_number = 0
         return ret, frame
     
     def stop(self):
@@ -132,5 +205,4 @@ class CameraManager:
     def __del__(self):
         """Cleanup on object destruction"""
         self.stop()
-
 

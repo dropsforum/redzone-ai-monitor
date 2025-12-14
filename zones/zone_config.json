@@ -1,9 +1,11 @@
 {
   "settings": {
     "camera_index": 0,
-    "camera_width": 640,
-    "camera_height": 480,
+    "camera_width": 1280,
+    "camera_height": 720,
     "camera_fps": 15,
+    "video_source": "camera",
+    "video_file_path": "",
     "model_size": "yolov8n.pt",
     "confidence_threshold": 0.5,
     "alert_cooldown": 5,
@@ -30,46 +32,5 @@
     "alert_activation_frames": 3,
     "show_debug": true
   },
-  "zone_points": [
-    [
-      122,
-      35
-    ],
-    [
-      432,
-      36
-    ],
-    [
-      438,
-      290
-    ],
-    [
-      103,
-      293
-    ],
-    [
-      228,
-      168
-    ],
-    [
-      313,
-      136
-    ],
-    [
-      208,
-      116
-    ],
-    [
-      156,
-      168
-    ],
-    [
-      194,
-      68
-    ],
-    [
-      121,
-      36
-    ]
-  ]
+  "zone_points": []
 }

@@ -1,6 +1,6 @@
 """
 AI Motion Detection App
-A macOS application for AI-powered motion detection with zone monitoring.
+A cross-platform application (macOS and Windows) for AI-powered motion detection with zone monitoring.
 """
 
 __version__ = "1.0.0"

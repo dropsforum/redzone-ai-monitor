@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Launcher script for DROPS Red Zone Monitoring POC
+Launcher script for DROPS Red Zone Monitoring
 """
 
 import sys

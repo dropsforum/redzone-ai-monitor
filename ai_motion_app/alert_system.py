@@ -4,10 +4,10 @@ Handles audible alerts and notifications
 """
 
 import time
-import os
-import subprocess
 from datetime import datetime
 from typing import Optional
+
+from .platform_utils import play_default_alert
 
 class AlertSystem:
     """Manage alerts and notifications when person detected in zone"""
@@ -34,8 +34,8 @@ class AlertSystem:
             return False
         
         try:
-            # Play system beep (macOS)
-            os.system('afplay /System/Library/Sounds/Glass.aiff &')
+            # Play platform-appropriate alert sound
+            play_default_alert()
             
             self.last_alert_time = time.time()
             self.alert_count += 1

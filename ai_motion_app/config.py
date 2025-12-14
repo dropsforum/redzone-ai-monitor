@@ -7,12 +7,15 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
+from .platform_utils import get_project_root
+
 class Config:
     """Manage application configuration and settings"""
     
     def __init__(self, config_dir: str = None):
         if config_dir is None:
-            self.config_dir = Path(__file__).parent.parent / "zones"
+            # Use project root/zones for config (works on all platforms)
+            self.config_dir = get_project_root() / "zones"
         else:
             self.config_dir = Path(config_dir)
         
@@ -22,9 +25,11 @@ class Config:
         # Default settings
         self.settings = {
             "camera_index": 0,  # 0 for Logitech C920
-            "camera_width": 640,
-            "camera_height": 480,
+            "camera_width": 1280,
+            "camera_height": 720,
             "camera_fps": 15,
+            "video_source": "camera",  # "camera" or "video"
+            "video_file_path": "",  # Path to video file when using video source
             "model_size": "yolov8n.pt",  # nano model for speed
             "confidence_threshold": 0.5,  # 50% confidence minimum
             "alert_cooldown": 5,  # seconds between alerts
@@ -74,5 +79,4 @@ class Config:
         """Set a configuration value"""
         self.settings[key] = value
         # Do not auto-save on every set to avoid IO churn; callers decide when to save
-
 

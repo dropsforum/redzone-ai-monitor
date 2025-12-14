@@ -1,10 +1,10 @@
 # Troubleshooting Guide
 
-Common issues and solutions for the Motion Detection Mac App.
+Common issues and solutions for DROPS Red Zone Monitoring (macOS and Windows).
 
 ## Installation Issues
 
-### Homebrew Not Installing
+### macOS: Homebrew Not Installing
 
 **Error:** "Need sudo access on macOS"
 
@@ -12,6 +12,27 @@ Common issues and solutions for the Motion Detection Mac App.
 1. Ensure you have administrator privileges
 2. Run the Homebrew install command in a regular Terminal (not from within this app)
 3. Enter your password when prompted
+
+### Windows: Python Not Found
+
+**Error:** `'python' is not recognized as an internal or external command`
+
+**Solution:**
+1. Reinstall Python from [python.org](https://www.python.org/downloads/)
+2. **Critical:** During installation, check "Add Python to PATH"
+3. Restart your command prompt/PowerShell after installation
+4. Verify: `python --version`
+
+### Windows: PowerShell Execution Policy
+
+**Error:** "cannot be loaded because running scripts is disabled on this system"
+
+**Solution:**
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+Then try running the setup script again.
 
 ### Dependencies Won't Install
 
@@ -56,7 +77,7 @@ brew install autoconf automake libtool
 
 ## Camera Issues
 
-### Camera Not Detected
+### macOS: Camera Not Detected
 
 **Problem:** `system_profiler SPCameraDataType` shows no cameras
 
@@ -82,7 +103,36 @@ brew install autoconf automake libtool
    - If using a USB hub, try connecting directly to Mac
    - Some hubs don't provide enough power
 
-### Camera Permission Denied
+### Windows: Camera Not Detected
+
+**Problem:** Camera not found or not working
+
+**Solutions:**
+
+1. **Check Physical Connection**
+   - Unplug and reconnect USB camera
+   - Try a different USB port (prefer USB 3.0 ports)
+   - Ensure camera LED is on (if applicable)
+
+2. **Check Device Manager**
+   - Open Device Manager (Win+X > Device Manager)
+   - Look under "Cameras" or "Imaging devices"
+   - If camera shows with yellow warning, update drivers
+
+3. **Check Other Apps**
+   - Close apps using camera (Zoom, Teams, Skype, etc.)
+   - Check Task Manager for camera processes
+   - Restart Windows if needed
+
+4. **Update Camera Drivers**
+   - Right-click camera in Device Manager > Update driver
+   - Or download drivers from manufacturer website
+
+5. **Test Camera**
+   - Use Windows Camera app to verify camera works
+   - Check if camera works in other applications
+
+### macOS: Camera Permission Denied
 
 **Problem:** Motion can't access camera
 
@@ -103,25 +153,57 @@ brew install autoconf automake libtool
 3. **Run with Permissions**
    ```bash
    # When testing, run from Terminal that has camera access
-   cd "/Volumes/Data Vault/Cursor 2/Motion"
+   cd /path/to/redzone-ai-monitor
    source venv/bin/activate
    python3 motion_app.py
    ```
 
+### Windows: Camera Permission Denied
+
+**Problem:** Application can't access camera
+
+**Solutions:**
+
+1. **Grant Permission in Windows Settings**
+   - Open Settings > Privacy & Security > Camera
+   - Enable "Let apps access your camera"
+   - Enable camera for Python or the application
+
+2. **Check Antivirus/Firewall**
+   - Some antivirus software blocks camera access
+   - Temporarily disable to test, then add exception
+
+3. **Run as Administrator**
+   - Right-click Command Prompt/PowerShell
+   - Select "Run as administrator"
+   - Try running the application again
+
 ### Wrong Camera Selected
 
-**Problem:** Motion using wrong camera (if you have multiple)
+**Problem:** Application using wrong camera (if you have multiple)
 
 **Solution:**
 
-Edit `config/motion.conf` and specify the camera:
+Edit `zones/zone_config.json` and specify the camera index:
 
-```conf
-# List available cameras first
-# ls -l /dev/video*
+```json
+{
+  "settings": {
+    "camera_index": 1  // Try 0, 1, 2, etc. until you find the right camera
+  }
+}
+```
 
-# Then specify in config
-videodevice /dev/video1  # or appropriate device number
+**To find available cameras:**
+
+**macOS/Linux:**
+```bash
+python3 -c "import cv2; [print(f'Camera {i}: {cv2.VideoCapture(i).read()[0]}') for i in range(10)]"
+```
+
+**Windows:**
+```cmd
+python -c "import cv2; [print(f'Camera {i}: {cv2.VideoCapture(i).read()[0]}') for i in range(10)]"
 ```
 
 ## Motion Detection Issues
@@ -521,9 +603,18 @@ For advanced configuration options, see:
 ### Report Issues
 
 If you find bugs or need help:
+
+**macOS:**
 1. Check logs: `logs/motion.log`
-2. Run diagnostics: `python3 test_camera.py`
+2. Run diagnostics: `python3 scripts/test_ai_performance.py`
 3. Document the error messages
 4. Note your macOS version and camera model
+
+**Windows:**
+1. Check application output in console
+2. Run diagnostics: `python scripts\test_ai_performance.py`
+3. Document the error messages
+4. Note your Windows version and camera model
+5. Include Python version: `python --version`
 
 

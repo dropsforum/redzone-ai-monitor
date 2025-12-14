@@ -126,7 +126,7 @@ def test_mask_in_config():
     
     if not config_file.exists():
         print("\n⚠️  Warning: Configuration file not found")
-        print("   Run: python3 create_config.py")
+        print("   Run: python3 scripts/create_config.py")
         return
     
     try:

@@ -1,5 +1,5 @@
-# PyInstaller spec for DROPS Red Zone Monitoring (arm64, unsigned)
-# Builds a windowed .app that launches the OpenCV UI without a Terminal
+# PyInstaller spec for DROPS Red Zone Monitoring (Windows)
+# Builds a windowed .exe that launches the OpenCV UI without a console window
 
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
@@ -18,6 +18,7 @@ for pkg in [
     "torchvision",
     "pygame",
     "PIL",
+    "winsound",  # Windows sound support
 ]:
     try:
         hiddenimports.extend(collect_submodules(pkg))
@@ -55,7 +56,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    runtime_hooks=[os.path.join(project_root, "packaging", "macos", "runtime_hook.py")],
+    runtime_hooks=[],  # Windows doesn't need runtime hooks typically
     noarchive=False,
 )
 
@@ -68,20 +69,10 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     name="DROPS Red Zone Monitoring",
-    console=False,
+    console=False,  # Windowed mode (no console)
     disable_windowed_traceback=False,
-)
-
-app = BUNDLE(
-    exe,
-    name="DROPS Red Zone Monitoring.app",
-    icon=None,  # Provide packaging/macos/icon.icns if available
-    bundle_identifier="com.drops.redzone.monitoring",
-    info_plist={
-        "NSCameraUsageDescription": "Camera access is required to monitor the zone.",
-        "CFBundleName": "DROPS Red Zone Monitoring",
-        "LSMinimumSystemVersion": "12.0",
-    },
+    icon=None,  # Provide packaging/windows/icon.ico if available
+    version=None,  # Provide version info file if available
 )
 
 

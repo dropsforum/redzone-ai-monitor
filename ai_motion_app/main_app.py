@@ -31,9 +31,11 @@ class MotionDetectionApp:
         # Initialize components
         self.camera = CameraManager(
             camera_index=self.config.get('camera_index', 0),
-            width=self.config.get('camera_width', 640),
-            height=self.config.get('camera_height', 480),
-            fps=self.config.get('camera_fps', 15)
+            width=self.config.get('camera_width', 1280),
+            height=self.config.get('camera_height', 720),
+            fps=self.config.get('camera_fps', 15),
+            source_type=self.config.get('video_source', 'camera'),
+            video_path=self.config.get('video_file_path', '')
         )
         
         self.detector = AIDetector(
@@ -49,7 +51,7 @@ class MotionDetectionApp:
         # Application state
         self.state = self.STATE_SETUP
         self.running = False
-        self.window_name = "DROPS Red Zone Monitoring POC"
+        self.window_name = "DROPS Red Zone Monitoring"
         
         # Performance metrics
         self.fps = 0
@@ -130,7 +132,18 @@ class MotionDetectionApp:
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         
         # FPS, Camera, Zone, and Alert info on same line
-        info_text = f"FPS: {self.fps:.1f}  Cam: {self.camera.camera_index}"
+        if self.camera.source_type == "video":
+            video_label = "Video: "
+            if self.camera.video_path:
+                video_label += self.camera.video_path.name
+            else:
+                video_label += "Unknown"
+            if self.camera.total_frames > 0:
+                current = min(self.camera.current_frame_number, self.camera.total_frames)
+                video_label += f" (Frame {current}/{self.camera.total_frames})"
+            info_text = f"FPS: {self.fps:.1f}  {video_label}"
+        else:
+            info_text = f"FPS: {self.fps:.1f}  Cam: {self.camera.camera_index}"
         cv2.putText(canvas, info_text, (10, 50),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
@@ -310,6 +323,9 @@ class MotionDetectionApp:
         
         elif key == ord('m') or key == ord('M'):
             # Cycle through available cameras
+            if self.camera.source_type != "camera":
+                print("\n⚠️ Camera switching is disabled while using a video file source.")
+                return
             if not self.camera.available_cameras:
                 self.camera.enumerate_cameras()
             cams = self.camera.available_cameras or [self.camera.camera_index]
@@ -330,12 +346,15 @@ class MotionDetectionApp:
     def run(self):
         """Main application loop"""
         print("\n" + "="*60)
-        print("DROPS Red Zone Monitoring POC")
+        print("DROPS Red Zone Monitoring")
         print("="*60)
         
         # Start camera
         if not self.camera.start():
-            print("✗ Failed to start camera. Exiting.")
+            if self.camera.source_type == "video":
+                print("✗ Failed to start video source. Please verify 'video_file_path' in the configuration.")
+            else:
+                print("✗ Failed to start camera. Exiting.")
             return
 
         # Create window and set mouse callback early
@@ -417,5 +436,4 @@ class MotionDetectionApp:
                 print(f"  Last alert: {stats['last_alert']}")
             print("="*60)
             print("\n✓ Application closed\n")
-
 
