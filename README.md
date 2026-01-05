@@ -25,6 +25,15 @@ This is a Next.js-based Proof of Concept (POC) for the DROPS Red Zone Monitoring
     Open [http://localhost:3000](http://localhost:3000) in your browser.
     *Note: If port 3000 is in use, Next.js will automatically try 3001, 3002, etc.*
 
+## 🌐 Deployment (Vercel)
+
+This project is optimized for deployment on Vercel.
+
+**Note on Build**: Due to custom Webpack configurations required for ONNX Runtime Web, you must ensure the build command uses the `--webpack` flag:
+- **Build Command**: `npm run build` (which is mapped to `next build --webpack` in `package.json`)
+- **Framework Preset**: Next.js
+- **Node.js Version**: 20.x or 22.x
+
 ## 📦 Features
 
 - **Real-time AI Detection**: Runs YOLOv11 directly in your browser using ONNX Runtime Web.

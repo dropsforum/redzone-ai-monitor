@@ -17,6 +17,8 @@ To run this app locally for testing:
 2. **Launch server**: `npm run dev`
 3. **Open browser**: Go to `http://localhost:3000` (or `http://localhost:3001` if 3000 is occupied).
 
+**Note for Production Builds**: If you are using Next.js 15+, ensure you use the `--webpack` flag in your build command (e.g., `next build --webpack`) to support the custom Webpack configuration required for the ONNX models.
+
 ## How to integrate into dropsforum.org
 
 ### 1. Copy Files
