@@ -228,7 +228,7 @@ function HomeContent() {
   }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions]);
 
   return (
-    <main className={`min-h-screen bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans mx-auto ${isEmbedMode ? 'max-w-none w-full' : 'max-w-[700px]'}`}>
+    <main className={`bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans mx-auto ${isEmbedMode ? 'max-w-none w-full' : 'max-w-[700px]'}`}>
       {/* Header */}
       {!isEmbedMode && (
         <div className="flex flex-col gap-2 mb-6 border-b border-slate-100 pb-4">
