@@ -414,14 +414,6 @@ function HomeContent() {
 
       </div>
 
-      {/* Footer */}
-      {!isEmbedMode && (
-        <footer className="mt-auto py-6 text-center border-t border-slate-50">
-          <p className="text-[9px] text-slate-300 font-mono tracking-[0.2em] uppercase">
-            Client-Side Processing • No Cloud Storage • Secure Protocol
-          </p>
-        </footer>
-      )}
     </main>
   );
 }
