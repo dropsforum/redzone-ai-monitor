@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor } from 'lucide-react';
 import WebcamCapture, { WebcamCaptureHandle } from '../components/WebcamCapture';
 import ZoneEditor, { Point } from '../components/ZoneEditor';
@@ -10,8 +11,11 @@ import { YoloDetector, Detection } from '../lib/yolo-detector';
 import { isPersonInZone, isPersonNearZone } from '../lib/zone-checker';
 import { AlertManager } from '../lib/alert-manager';
 
-export default function Home() {
+function HomeContent() {
   // App State
+  const searchParams = useSearchParams();
+  const isEmbedMode = searchParams.get('embed') === 'true';
+  
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
@@ -224,22 +228,24 @@ export default function Home() {
   }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions]);
 
   return (
-    <main className="min-h-screen bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans max-w-[700px] mx-auto border-x border-slate-100 shadow-sm">
+    <main className={`min-h-screen bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans mx-auto ${isEmbedMode ? 'max-w-none w-full border-none shadow-none' : 'max-w-[700px] border-x border-slate-100 shadow-sm'}`}>
       {/* Header */}
-      <div className="flex flex-col gap-2 mb-6 border-b border-slate-100 pb-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-xl font-black tracking-tighter text-[#55799a] uppercase italic text-center md:text-left">
-            DROPS FORUM RED ZONE MONITOR POC
-          </h1>
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
-            <Cpu className="w-3 h-3 text-[#55799a]" />
-            <span className="text-[10px] font-bold uppercase text-slate-600">{isModelLoaded ? 'AI Ready' : 'Loading...'}</span>
+      {!isEmbedMode && (
+        <div className="flex flex-col gap-2 mb-6 border-b border-slate-100 pb-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-xl font-black tracking-tighter text-[#55799a] uppercase italic text-center md:text-left">
+              DROPS FORUM RED ZONE MONITOR POC
+            </h1>
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
+              <Cpu className="w-3 h-3 text-[#55799a]" />
+              <span className="text-[10px] font-bold uppercase text-slate-600">{isModelLoaded ? 'AI Ready' : 'Loading...'}</span>
+            </div>
           </div>
+          <p className="text-slate-400 text-[10px] font-mono flex items-center gap-2 uppercase tracking-widest">
+            <Zap className="w-3 h-3 text-[#55799a]" /> POWERED BY YOLOv11 AI • BROWSER-NATIVE
+          </p>
         </div>
-        <p className="text-slate-400 text-[10px] font-mono flex items-center gap-2 uppercase tracking-widest">
-          <Zap className="w-3 h-3 text-[#55799a]" /> POWERED BY YOLOv11 AI • BROWSER-NATIVE
-        </p>
-      </div>
+      )}
 
       <div className="space-y-6">
         {/* Monitoring Panel */}
@@ -409,11 +415,25 @@ export default function Home() {
       </div>
 
       {/* Footer */}
-      <footer className="mt-auto py-6 text-center border-t border-slate-50">
-        <p className="text-[9px] text-slate-300 font-mono tracking-[0.2em] uppercase">
-          Client-Side Processing • No Cloud Storage • Secure Protocol
-        </p>
-      </footer>
+      {!isEmbedMode && (
+        <footer className="mt-auto py-6 text-center border-t border-slate-50">
+          <p className="text-[9px] text-slate-300 font-mono tracking-[0.2em] uppercase">
+            Client-Side Processing • No Cloud Storage • Secure Protocol
+          </p>
+        </footer>
+      )}
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-[#55799a] border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }

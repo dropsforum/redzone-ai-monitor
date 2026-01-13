@@ -35,24 +35,34 @@ async function run(imageData: ImageData) {
 
   const { width, height, data } = imageData;
 
+  // Guard against zero-sized frames (can occur during camera init on mobile)
+  if (!width || !height) {
+    console.warn('[Worker] Skipping run due to zero-sized frame');
+    self.postMessage({ type: 'RESULT', detections: [] });
+    return;
+  }
+
+  // Lightweight diagnostic to confirm incoming frame sizes on mobile
+  if ((self as any).__logOnce_frameSize !== true) {
+    console.log(`[Worker] Frame ${width}x${height}`);
+    (self as any).__logOnce_frameSize = true;
+  }
+
   try {
     // 1. Preprocess (Normalized Float32 NCHW)
     const float32Data = new Float32Array(3 * modelSize * modelSize);
     
-    // We need to resize the image to 640x640 for YOLO
-    // Simple nearest neighbor or bilinear would be better, but let's assume the main thread sends 640x640 or handle it here
-    // For now, let's assume main thread is sending the actual video frame and we downscale
-    
-    // Note: The main thread currently sends the full canvas ImageData.
-    // We'll do a simple resize here.
-    const stride = Math.floor(width / modelSize);
-    const vStride = Math.floor(height / modelSize);
+    // Use scale factors instead of integer stride so small frames (<640px) still map correctly
+    const scaleX = width / modelSize;
+    const scaleY = height / modelSize;
 
     for (let y = 0; y < modelSize; y++) {
+      const srcY = Math.min(height - 1, Math.floor((y + 0.5) * scaleY));
       for (let x = 0; x < modelSize; x++) {
+        const srcX = Math.min(width - 1, Math.floor((x + 0.5) * scaleX));
+        const sourceIdx = (srcY * width + srcX) * 4;
+
         const i = (y * modelSize + x);
-        const sourceIdx = ((y * vStride * width) + (x * stride)) * 4;
-        
         float32Data[i] = data[sourceIdx] / 255.0; // R
         float32Data[i + modelSize * modelSize] = data[sourceIdx + 1] / 255.0; // G
         float32Data[i + 2 * modelSize * modelSize] = data[sourceIdx + 2] / 255.0; // B

@@ -3,6 +3,19 @@ import CopyPlugin from "copy-webpack-plugin";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-ancestors 'self' https://www.dropsforum.org https://dropsforum.org;",
+          },
+        ],
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     // Fixes npm packages that depend on `fs` module
     config.resolve.fallback = {
