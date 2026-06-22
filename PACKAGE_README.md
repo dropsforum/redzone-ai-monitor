@@ -4,8 +4,8 @@ This package contains the Next.js browser-based YOLO detection module for integr
 
 ## What's included
 
-- **AI Engine**: Client-side YOLOv11 (ONNX Runtime Web)
-- **UI Components**: Webcam capture, Touch-friendly Zone Editor, Detection Overlay
+- **AI Engine**: Client-side YOLO26 (ONNX Runtime Web)
+- **UI Components**: Camera/recorded-video frame source, Touch-friendly Zone Editor, Detection Overlay
 - **Logic**: Zone intrusion detection, Alert system
 - **Performance**: Optimized for Desktop (10 FPS) and Mobile (3 FPS)
 
@@ -25,30 +25,20 @@ To run this app locally for testing:
 Copy these directories into your `dropsforum.org` project:
 - `src/components/*` -> `components/`
 - `src/lib/*` -> `lib/`
-- `public/models/yolo11n.onnx` -> `public/models/`
+- `public/models/yolo26n.onnx` -> `public/models/`
+- `public/wasm/*` -> `public/wasm/`
 
 ### 2. Install Dependencies
 Run this in your website project:
 ```bash
-npm install onnxruntime-web lucide-react clsx tailwind-merge copy-webpack-plugin
+npm install onnxruntime-web lucide-react clsx tailwind-merge
 ```
 
-### 3. Update next.config.ts
-Add the WASM copy plugin to your `next.config.ts`:
-```typescript
-import CopyPlugin from "copy-webpack-plugin";
-
-// ... inside nextConfig.webpack
-config.plugins.push(
-  new CopyPlugin({
-    patterns: [
-      {
-        from: "node_modules/onnxruntime-web/dist/*.wasm",
-        to: "static/chunks/[name][ext]",
-      },
-    ],
-  })
-);
+### 3. Serve ONNX Runtime assets
+Copy the matching ONNX Runtime Web distribution files into `public/wasm`:
+```bash
+rm -rf public/wasm/*
+cp node_modules/onnxruntime-web/dist/* public/wasm/
 ```
 
 ### 4. Use the Monitoring Page
@@ -56,3 +46,13 @@ Copy `src/app/page.tsx` (or its contents) to your desired route (e.g., `app/redz
 
 ## Note on Mobile Performance
 The app automatically detects mobile devices and reduces inference frequency and resolution to preserve battery and performance.
+
+## Model Provenance
+
+- Model file: `public/models/yolo26n.onnx`
+- Source model: `yolo26n.pt` from Ultralytics assets
+- Export date: 2026-06-16
+- Export toolchain: `ultralytics==8.4.68`, `onnx==1.20.0`, Python 3.12
+- Export command: `YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)`
+- Expected input shape: `(1, 3, 640, 640)`
+- Expected output shape: `(1, 300, 6)`

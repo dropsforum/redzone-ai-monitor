@@ -1,0 +1,26 @@
+# Native Mac desktop app dependencies
+# Tested target: Python 3.11 on Apple Silicon.
+
+# Computer Vision and AI
+opencv-python==4.13.0.92
+ultralytics==8.4.68
+lap==0.5.13
+torch==2.12.0
+torchvision==0.27.0
+numpy>=1.26.0,<3.0.0
+
+# Audio for alerts
+pygame==2.6.1
+
+# Native Mac UI
+PySide6==6.11.1
+
+# Image processing
+Pillow>=10.0.0,<13.0.0
+
+# Configuration
+pyyaml>=6.0.3
+
+# Utilities
+python-dateutil>=2.9.0
+pyinstaller==6.21.0

@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import CopyPlugin from "copy-webpack-plugin";
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -16,7 +15,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config) => {
     // Fixes npm packages that depend on `fs` module
     config.resolve.fallback = {
       ...config.resolve.fallback,

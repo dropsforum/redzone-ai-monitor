@@ -1,5 +1,9 @@
 "use client";
 
+interface AudioWindow extends Window {
+  webkitAudioContext?: typeof AudioContext;
+}
+
 export class AlertManager {
   private lastAlertTime: number = 0;
   private cooldownMs: number;
@@ -17,7 +21,9 @@ export class AlertManager {
   async unlockAudio(): Promise<void> {
     try {
       if (!this.audioContext) {
-        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const AudioContextConstructor = window.AudioContext || (window as AudioWindow).webkitAudioContext;
+        if (!AudioContextConstructor) return;
+        this.audioContext = new AudioContextConstructor();
       }
       
       if (this.audioContext.state === 'suspended') {
@@ -68,7 +74,9 @@ export class AlertManager {
   private async playAlertSound(): Promise<void> {
     try {
       if (!this.audioContext) {
-        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const AudioContextConstructor = window.AudioContext || (window as AudioWindow).webkitAudioContext;
+        if (!AudioContextConstructor) return;
+        this.audioContext = new AudioContextConstructor();
       }
       
       // Resume if suspended

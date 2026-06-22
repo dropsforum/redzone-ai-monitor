@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor } from 'lucide-react';
-import WebcamCapture, { WebcamCaptureHandle } from '../components/WebcamCapture';
+import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor, Video, UploadCloud } from 'lucide-react';
+import VideoFrameSource, { VideoFrameRect, VideoFrameSourceHandle, VideoSourceMode } from '../components/VideoFrameSource';
 import ZoneEditor, { Point } from '../components/ZoneEditor';
 import DetectionOverlay from '../components/DetectionOverlay';
 import TrafficLight, { TrafficLightState } from '../components/TrafficLight';
@@ -20,19 +20,24 @@ function HomeContent() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isMobileMode, setIsMobileMode] = useState(false);
+  const [isMobileMode] = useState(() => (
+    typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  ));
   const [fps, setFps] = useState(0);
+  const [sourceMode, setSourceMode] = useState<VideoSourceMode>('camera');
   
   // Data State
   const [detections, setDetections] = useState<Detection[]>([]);
   const [zone, setZone] = useState<Point[]>([]);
-  const [alertActive, setAlertActive] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [trafficLightState, setTrafficLightState] = useState<TrafficLightState>('green');
   
   // Camera State
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoFileName, setVideoFileName] = useState<string | null>(null);
+  const [frameRect, setFrameRect] = useState<VideoFrameRect>({ left: 0, top: 0, width: 0, height: 0 });
   
   // Detection Settings
   const [warningBuffer, setWarningBuffer] = useState(0.1); // normalized distance 0.0 - 0.3
@@ -40,16 +45,72 @@ function HomeContent() {
   // Refs
   const detectorRef = useRef<YoloDetector | null>(null);
   const alertManagerRef = useRef<AlertManager>(new AlertManager(5));
-  const webcamRef = useRef<WebcamCaptureHandle>(null);
+  const videoSourceRef = useRef<VideoFrameSourceHandle>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoObjectUrlRef = useRef<string | null>(null);
   const lastProcessedTimeRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const lastFpsUpdateRef = useRef<number>(0);
 
+  const resetRuntimeState = useCallback(() => {
+    setIsMonitoring(false);
+    setDetections([]);
+    setTrafficLightState('green');
+    setDimensions({ width: 0, height: 0 });
+    setFrameRect({ left: 0, top: 0, width: 0, height: 0 });
+    setFps(0);
+    frameCountRef.current = 0;
+    lastProcessedTimeRef.current = 0;
+    lastFpsUpdateRef.current = 0;
+  }, []);
+
+  const clearRecordedVideo = useCallback(() => {
+    if (videoObjectUrlRef.current) {
+      URL.revokeObjectURL(videoObjectUrlRef.current);
+      videoObjectUrlRef.current = null;
+    }
+    setVideoUrl(null);
+    setVideoFileName(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const handleSourceModeChange = useCallback((nextMode: VideoSourceMode) => {
+    if (nextMode === sourceMode) return;
+    resetRuntimeState();
+    setIsDrawing(false);
+    setSourceMode(nextMode);
+    if (nextMode === 'camera') clearRecordedVideo();
+  }, [clearRecordedVideo, resetRuntimeState, sourceMode]);
+
+  const loadRecordedVideo = useCallback((file: File) => {
+    resetRuntimeState();
+    setIsDrawing(false);
+    clearRecordedVideo();
+
+    const nextUrl = URL.createObjectURL(file);
+    videoObjectUrlRef.current = nextUrl;
+    setVideoUrl(nextUrl);
+    setVideoFileName(file.name);
+    setSourceMode('file');
+  }, [clearRecordedVideo, resetRuntimeState]);
+
+  const handleVideoFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    loadRecordedVideo(file);
+  }, [loadRecordedVideo]);
+
+  useEffect(() => {
+    return () => {
+      if (videoObjectUrlRef.current) URL.revokeObjectURL(videoObjectUrlRef.current);
+    };
+  }, []);
+
   // Screenshot Logic
   const captureScreenshot = useCallback(() => {
-    if (!webcamRef.current || !dimensions.width) return;
+    if (!videoSourceRef.current || !dimensions.width) return;
 
-    const video = webcamRef.current.getVideo();
+    const video = videoSourceRef.current.getVideo();
     if (!video) return;
 
     const canvas = document.createElement('canvas');
@@ -116,6 +177,8 @@ function HomeContent() {
   // Enumerate cameras
   const getDevices = useCallback(async (requestPermission = false) => {
     try {
+      if (!navigator.mediaDevices) return;
+
       if (requestPermission) {
         // Explicitly request permission to trigger browser device discovery
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -137,18 +200,25 @@ function HomeContent() {
   }, [selectedDeviceId]);
 
   useEffect(() => {
+    if (!navigator.mediaDevices) return;
+
+    const handleDeviceChange = () => {
+      void getDevices();
+    };
+
     // Initial scan
-    getDevices();
+    const initialScan = setTimeout(() => void getDevices(), 0);
     
     // Re-scan after a short delay to catch Continuity Cameras/iPhone
-    const timer = setTimeout(() => getDevices(), 2000);
+    const timer = setTimeout(() => void getDevices(), 2000);
     
     // Listen for hardware changes
-    navigator.mediaDevices.addEventListener('devicechange', () => getDevices());
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
     
     return () => {
+      clearTimeout(initialScan);
       clearTimeout(timer);
-      navigator.mediaDevices.removeEventListener('devicechange', () => getDevices());
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
   }, [getDevices]);
 
@@ -156,22 +226,12 @@ function HomeContent() {
   useEffect(() => {
     const init = async () => {
       const detector = new YoloDetector();
-      await detector.init('/models/yolo11n.onnx');
+      await detector.init('/models/yolo26n.onnx');
       detectorRef.current = detector;
       setIsModelLoaded(true);
     };
-    init();
-
-    // Check if mobile
-    setIsMobileMode(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+    void init();
   }, []);
-
-  // Reset traffic light when not monitoring
-  useEffect(() => {
-    if (!isMonitoring) {
-      setTrafficLightState('green');
-    }
-  }, [isMonitoring]);
 
   // Update dimensions when video loads
   const handleFrame = useCallback((canvas: HTMLCanvasElement) => {
@@ -202,11 +262,9 @@ function HomeContent() {
           });
 
           if (personInZone) {
-            setAlertActive(true);
             setTrafficLightState('red');
             alertManagerRef.current.trigger(isAudioEnabled).catch(e => console.error('[APP] Alert trigger failed:', e));
           } else {
-            setAlertActive(false);
             // Yellow: person is near or partially in zone
             const personNearZone = results.some(det => isPersonNearZone(det, zone, canvas.width, canvas.height, warningBuffer));
             setTrafficLightState(personNearZone ? 'yellow' : 'green');
@@ -225,7 +283,15 @@ function HomeContent() {
         }
       });
     }
-  }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions]);
+  }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions, warningBuffer]);
+
+  const overlayStyle: React.CSSProperties = {
+    left: frameRect.left,
+    top: frameRect.top,
+    width: frameRect.width || '100%',
+    height: frameRect.height || '100%',
+  };
+  const hasActiveVideoSource = Boolean(dimensions.width && dimensions.height && (sourceMode === 'camera' || videoUrl));
 
   return (
     <main className={`bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans mx-auto ${isEmbedMode ? 'max-w-none w-full' : 'max-w-[700px]'}`}>
@@ -242,7 +308,7 @@ function HomeContent() {
             </div>
           </div>
           <p className="text-slate-400 text-[10px] font-mono flex items-center gap-2 uppercase tracking-widest">
-            <Zap className="w-3 h-3 text-[#55799a]" /> POWERED BY YOLOv11 AI • BROWSER-NATIVE
+            <Zap className="w-3 h-3 text-[#55799a]" /> POWERED BY YOLO26 AI • BROWSER-NATIVE
           </p>
         </div>
       )}
@@ -250,29 +316,89 @@ function HomeContent() {
       <div className="space-y-6">
         {/* Monitoring Panel */}
         <div className="space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => handleSourceModeChange('camera')}
+                className={`h-9 px-3 flex items-center gap-2 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                  sourceMode === 'camera' ? 'bg-white text-[#55799a] shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                Live Camera
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSourceModeChange('file')}
+                className={`h-9 px-3 flex items-center gap-2 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                  sourceMode === 'file' ? 'bg-white text-[#55799a] shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <Video className="w-3.5 h-3.5" />
+                Recorded Video
+              </button>
+            </div>
+
+            {sourceMode === 'file' && (
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-9 px-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white text-[#55799a] text-[10px] font-black uppercase tracking-widest shadow-sm hover:bg-slate-50 transition-all"
+                >
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  {videoFileName ? 'Replace Video' : 'Choose Video'}
+                </button>
+                {videoFileName && (
+                  <span className="max-w-[220px] truncate text-[10px] font-mono text-slate-400">
+                    {videoFileName}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="relative aspect-video bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-sm ring-1 ring-slate-100">
             {/* Components Layered */}
-            <WebcamCapture 
-              ref={webcamRef} 
+            <VideoFrameSource
+              ref={videoSourceRef}
               onFrame={handleFrame}
+              onFrameRectChange={setFrameRect}
               width={isMobileMode ? 640 : 1280}
               height={isMobileMode ? 480 : 720}
               deviceId={selectedDeviceId}
-            />
-            
-            <ZoneEditor 
-              width={dimensions.width} 
-              height={dimensions.height} 
-              isDrawing={isDrawing}
-              onZoneChange={setZone}
-              initialPoints={zone}
+              sourceMode={sourceMode}
+              videoUrl={videoUrl}
+              videoLabel={videoFileName}
+              frameIntervalMs={isMobileMode ? 333 : 100}
+              onVideoFileDrop={loadRecordedVideo}
             />
 
-            <DetectionOverlay 
-              detections={detections}
-              width={dimensions.width}
-              height={dimensions.height}
-            />
+            {hasActiveVideoSource && (
+              <div className="absolute z-20" style={overlayStyle}>
+                <ZoneEditor 
+                  width={dimensions.width} 
+                  height={dimensions.height} 
+                  isDrawing={isDrawing}
+                  onZoneChange={setZone}
+                  initialPoints={zone}
+                />
+
+                <DetectionOverlay 
+                  detections={detections}
+                  width={dimensions.width}
+                  height={dimensions.height}
+                />
+              </div>
+            )}
             
             {isMonitoring && <TrafficLight state={trafficLightState} />}
 
@@ -303,11 +429,22 @@ function HomeContent() {
           {/* Controls Footer */}
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={() => {
-                alertManagerRef.current.unlockAudio();
-                setIsMonitoring(!isMonitoring);
+              onClick={async () => {
+                await alertManagerRef.current.unlockAudio();
+                const nextMonitoring = !isMonitoring;
+
+                if (sourceMode === 'file') {
+                  if (nextMonitoring) {
+                    await videoSourceRef.current?.play().catch(e => console.error('[APP] Recorded video playback failed:', e));
+                  } else {
+                    videoSourceRef.current?.pause();
+                  }
+                }
+
+                setIsMonitoring(nextMonitoring);
+                if (!nextMonitoring) setTrafficLightState('green');
               }}
-              disabled={!isModelLoaded || zone.length < 3}
+              disabled={!isModelLoaded || zone.length < 3 || !hasActiveVideoSource}
               className={`flex-1 min-w-[140px] h-12 flex items-center justify-center gap-2 rounded-xl font-bold transition-all ${
                 isMonitoring 
                 ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' 
@@ -321,12 +458,16 @@ function HomeContent() {
             <button
               onClick={() => {
                 setIsDrawing(!isDrawing);
-                if (!isDrawing) setIsMonitoring(false);
+                if (!isDrawing) {
+                  setIsMonitoring(false);
+                  if (sourceMode === 'file') videoSourceRef.current?.pause();
+                }
               }}
+              disabled={!hasActiveVideoSource}
               className={`flex-1 min-w-[140px] h-12 flex items-center justify-center gap-2 rounded-xl font-bold transition-all border-2 ${
                 isDrawing 
                 ? `bg-red-50 border-red-500 text-red-500 ${zone.length >= 3 ? 'animate-subtle-blink border-red-600 shadow-md' : ''}` 
-                : `bg-white border-[#55799a] text-[#55799a] hover:bg-slate-50 shadow-sm ${zone.length === 0 ? 'animate-subtle-blink shadow-[#55799a]/20' : ''}`
+                : `bg-white border-[#55799a] text-[#55799a] hover:bg-slate-50 shadow-sm ${zone.length === 0 && hasActiveVideoSource ? 'animate-subtle-blink shadow-[#55799a]/20' : ''}`
               }`}
             >
               <Edit3 className="w-4 h-4" />
@@ -335,6 +476,7 @@ function HomeContent() {
             
             <button
               onClick={captureScreenshot}
+              disabled={!hasActiveVideoSource}
               className={`flex-1 min-w-[140px] h-12 flex items-center justify-center gap-2 rounded-xl font-bold text-[10px] bg-white border border-slate-200 text-[#55799a] hover:bg-slate-50 transition-all shadow-sm uppercase tracking-widest ${isMonitoring ? 'animate-subtle-blink ring-1 ring-[#55799a]/20' : ''}`}
               title="Capture Screenshot"
             >
@@ -381,35 +523,68 @@ function HomeContent() {
           </div>
 
           {/* System Info Panel */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest flex items-center gap-2">
-                <Settings className="w-3 h-3 text-[#55799a]" /> Active Camera
-              </span>
-              <button 
-                onClick={() => getDevices(true)}
-                className="text-[#55799a] hover:bg-slate-50 p-1 rounded-md transition-all border border-transparent hover:border-slate-100"
-                title="Refresh Hardware"
+          {sourceMode === 'camera' ? (
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest flex items-center gap-2">
+                  <Settings className="w-3 h-3 text-[#55799a]" /> Active Camera
+                </span>
+                <button 
+                  onClick={() => getDevices(true)}
+                  className="text-[#55799a] hover:bg-slate-50 p-1 rounded-md transition-all border border-transparent hover:border-slate-100"
+                  title="Refresh Hardware"
+                >
+                  <RefreshCcw className="w-2.5 h-2.5" />
+                </button>
+              </div>
+              <select 
+                value={selectedDeviceId || ''} 
+                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-[10px] font-mono text-slate-600 outline-none focus:ring-1 focus:ring-[#55799a] transition-all cursor-pointer"
               >
-                <RefreshCcw className="w-2.5 h-2.5" />
-              </button>
+                {availableDevices.length === 0 ? (
+                  <option value="">Searching...</option>
+                ) : (
+                  availableDevices.map((device, idx) => (
+                    <option key={device.deviceId + idx} value={device.deviceId}>
+                      {device.label || `Camera ${idx + 1}`}
+                    </option>
+                  ))
+                )}
+              </select>
             </div>
-            <select 
-              value={selectedDeviceId || ''} 
-              onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-[10px] font-mono text-slate-600 outline-none focus:ring-1 focus:ring-[#55799a] transition-all cursor-pointer"
-            >
-              {availableDevices.length === 0 ? (
-                <option value="">Searching...</option>
-              ) : (
-                availableDevices.map((device, idx) => (
-                  <option key={device.deviceId + idx} value={device.deviceId}>
-                    {device.label || `Camera ${idx + 1}`}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
+          ) : (
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest flex items-center gap-2">
+                  <Video className="w-3 h-3 text-[#55799a]" /> Recorded Video
+                </span>
+                {videoUrl && (
+                  <button
+                    onClick={() => {
+                      resetRuntimeState();
+                      clearRecordedVideo();
+                    }}
+                    className="text-[#55799a] hover:bg-slate-50 p-1 rounded-md transition-all border border-transparent hover:border-slate-100"
+                    title="Clear Video"
+                  >
+                    <RefreshCcw className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-10 px-3 flex items-center justify-center gap-2 rounded-lg border border-slate-100 bg-slate-50 text-[#55799a] text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all"
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                {videoFileName ? 'Replace Video' : 'Choose Video'}
+              </button>
+              <div className="h-5 truncate text-[10px] font-mono text-slate-400">
+                {videoFileName || 'No video selected'}
+              </div>
+            </div>
+          )}
         </div>
 
       </div>

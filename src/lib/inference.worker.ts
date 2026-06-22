@@ -6,6 +6,8 @@ interface Detection {
   confidence: number; classId: number;
 }
 
+type WorkerGlobal = typeof self & { __logOnce_frameSize?: boolean };
+
 let session: ort.InferenceSession | null = null;
 const modelSize = 640;
 const confidenceThreshold = 0.35; // Standard threshold
@@ -43,9 +45,10 @@ async function run(imageData: ImageData) {
   }
 
   // Lightweight diagnostic to confirm incoming frame sizes on mobile
-  if ((self as any).__logOnce_frameSize !== true) {
+  const workerSelf = self as WorkerGlobal;
+  if (workerSelf.__logOnce_frameSize !== true) {
     console.log(`[Worker] Frame ${width}x${height}`);
-    (self as any).__logOnce_frameSize = true;
+    workerSelf.__logOnce_frameSize = true;
   }
 
   try {
@@ -72,7 +75,7 @@ async function run(imageData: ImageData) {
     const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, modelSize, modelSize]);
 
     // 2. Inference
-    const feeds: any = {};
+    const feeds: Record<string, ort.Tensor> = {};
     feeds[session.inputNames[0]] = inputTensor;
     const outputData = await session.run(feeds);
     const output = outputData[session.outputNames[0]];
@@ -89,34 +92,99 @@ async function run(imageData: ImageData) {
 
 function postprocess(output: ort.Tensor, origWidth: number, origHeight: number): Detection[] {
   const data = output.data as Float32Array;
-  const dims = output.dims; // [1, 84, 8400]
-  const numRows = dims[1]; // 84
-  const numCols = dims[2]; // 8400
+  const dims = output.dims;
 
+  if (dims.length === 3) {
+    const [, first, second] = dims;
+    const attrMajor = first <= second;
+    return nms(readYoloRows(data, attrMajor ? second : first, attrMajor ? first : second, attrMajor, origWidth, origHeight));
+  }
+
+  if (dims.length === 2) {
+    return nms(readYoloRows(data, dims[0], dims[1], false, origWidth, origHeight));
+  }
+
+  console.warn('[Worker] Unsupported output dimensions:', dims);
+  return [];
+}
+
+function readYoloRows(
+  data: Float32Array,
+  rowCount: number,
+  attrCount: number,
+  attrMajor: boolean,
+  origWidth: number,
+  origHeight: number,
+): Detection[] {
   const boxes: Detection[] = [];
 
-  for (let i = 0; i < numCols; i++) {
-    // YOLOv11 structure: first 4 are box (cx, cy, w, h), rest are classes
-    // Class 0 is 'person'
-    const personScore = data[4 * numCols + i];
+  for (let i = 0; i < rowCount; i++) {
+    const attrs = Array.from({ length: attrCount }, (_, attrIndex) => (
+      attrMajor ? data[attrIndex * rowCount + i] : data[i * attrCount + attrIndex]
+    ));
+    const detection = parseDetection(attrs, origWidth, origHeight);
+    if (detection) boxes.push(detection);
+  }
 
-    if (personScore > confidenceThreshold) {
-      const cx = data[0 * numCols + i];
-      const cy = data[1 * numCols + i];
-      const w = data[2 * numCols + i];
-      const h = data[3 * numCols + i];
+  return boxes;
+}
 
-      // Convert to actual pixel coordinates on the original frame
-      const x1 = ((cx - w / 2) / modelSize) * origWidth;
-      const y1 = ((cy - h / 2) / modelSize) * origHeight;
-      const x2 = ((cx + w / 2) / modelSize) * origWidth;
-      const y2 = ((cy + h / 2) / modelSize) * origHeight;
+function parseDetection(attrs: number[], origWidth: number, origHeight: number): Detection | null {
+  if (attrs.length < 5) return null;
 
-      boxes.push({ x1, y1, x2, y2, confidence: personScore, classId: 0 });
+  if (attrs.length === 6 && Number.isInteger(Math.round(attrs[5]))) {
+    const [x1, y1, x2, y2, score, classId] = attrs;
+    if (Math.round(classId) !== 0 || score <= confidenceThreshold) return null;
+    return scaleBox({ x1, y1, x2, y2, confidence: score, classId: 0 }, origWidth, origHeight, true);
+  }
+
+  const classScores = attrs.slice(4);
+  if (!classScores.length) return null;
+
+  let classId = 0;
+  let confidence = classScores[0];
+  for (let i = 1; i < classScores.length; i++) {
+    if (classScores[i] > confidence) {
+      confidence = classScores[i];
+      classId = i;
     }
   }
 
-  return nms(boxes);
+  if (classId !== 0 || confidence <= confidenceThreshold) return null;
+
+  const [cx, cy, w, h] = attrs;
+  return scaleBox({
+    x1: cx - w / 2,
+    y1: cy - h / 2,
+    x2: cx + w / 2,
+    y2: cy + h / 2,
+    confidence,
+    classId,
+  }, origWidth, origHeight, false);
+}
+
+function scaleBox(box: Detection, origWidth: number, origHeight: number, xyxyOutput: boolean): Detection {
+  const maxCoord = Math.max(Math.abs(box.x1), Math.abs(box.y1), Math.abs(box.x2), Math.abs(box.y2));
+  const scaleX = maxCoord <= 1 ? origWidth : origWidth / modelSize;
+  const scaleY = maxCoord <= 1 ? origHeight : origHeight / modelSize;
+
+  const scaled = {
+    ...box,
+    x1: box.x1 * scaleX,
+    y1: box.y1 * scaleY,
+    x2: box.x2 * scaleX,
+    y2: box.y2 * scaleY,
+  };
+
+  if (!xyxyOutput || scaled.x2 >= scaled.x1) return scaled;
+
+  return {
+    ...scaled,
+    x1: scaled.x2,
+    x2: scaled.x1,
+    y1: Math.min(scaled.y1, scaled.y2),
+    y2: Math.max(scaled.y1, scaled.y2),
+  };
 }
 
 function nms(boxes: Detection[]): Detection[] {

@@ -19,6 +19,15 @@
 
 # production
 /build
+/dist
+
+# native mac packaging
+/.venv-mac
+/models/*.pt
+/*.pt
+/*.dmg
+__pycache__/
+**/__pycache__/
 
 # misc
 .DS_Store

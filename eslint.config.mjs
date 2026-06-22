@@ -11,7 +11,11 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "dist/**",
+    ".venv-mac/**",
+    "models/**",
     "next-env.d.ts",
+    "public/wasm/**",
   ]),
 ]);
 

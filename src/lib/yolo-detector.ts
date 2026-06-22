@@ -11,7 +11,6 @@ export interface Detection {
 
 export class YoloDetector {
   private worker: Worker | null = null;
-  private modelSize = 640;
   private isProcessing = false;
   private resolveInit: ((value: boolean) => void) | null = null;
   private resolveDetect: ((value: Detection[]) => void) | null = null;
