@@ -23,6 +23,7 @@
 
 # native mac packaging
 /.venv-mac
+/public/models/*.onnx
 /models/*.pt
 /*.pt
 /*.dmg

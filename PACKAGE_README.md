@@ -25,8 +25,9 @@ To run this app locally for testing:
 Copy these directories into your `dropsforum.org` project:
 - `src/components/*` -> `components/`
 - `src/lib/*` -> `lib/`
-- `public/models/yolo26n.onnx` -> `public/models/`
 - `public/wasm/*` -> `public/wasm/`
+
+Model binaries are intentionally not committed to this public package. Generate `public/models/yolo26n.onnx` locally from Ultralytics before running detection.
 
 ### 2. Install Dependencies
 Run this in your website project:
@@ -50,9 +51,23 @@ The app automatically detects mobile devices and reduces inference frequency and
 ## Model Provenance
 
 - Model file: `public/models/yolo26n.onnx`
-- Source model: `yolo26n.pt` from Ultralytics assets
-- Export date: 2026-06-16
+- Source model: `yolo26n.pt` from Ultralytics assets, downloaded/exported locally by each user
+- Model binaries: intentionally excluded from this public repository
 - Export toolchain: `ultralytics==8.4.68`, `onnx==1.20.0`, Python 3.12
 - Export command: `YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)`
 - Expected input shape: `(1, 3, 640, 640)`
 - Expected output shape: `(1, 300, 6)`
+
+Example local export:
+
+```bash
+python -m pip install ultralytics onnx
+python - <<'PY'
+from pathlib import Path
+from ultralytics import YOLO
+
+exported = YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)
+Path("public/models").mkdir(parents=True, exist_ok=True)
+Path(exported).replace("public/models/yolo26n.onnx")
+PY
+```

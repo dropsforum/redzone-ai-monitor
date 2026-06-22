@@ -1,0 +1,14 @@
+DROPS Red Zone Monitoring
+
+This public repository contains application source code for local red-zone monitoring.
+It does not include videos, customer data, signing certificates, Apple credentials, or YOLO model binaries.
+
+Third-party components include:
+
+- Ultralytics YOLO tooling and models. Users must obtain/export model weights locally and comply with Ultralytics license terms.
+- ONNX Runtime Web, used for browser inference runtime assets.
+- Next.js, React, Tailwind CSS, and related npm packages for the web app.
+- Python, OpenCV, PySide6, PyTorch, and Ultralytics dependencies for the native Mac app.
+
+The browser expects a locally generated model at `public/models/yolo26n.onnx`.
+The native Mac app can download/use `yolo26n.pt` locally through Ultralytics tooling during development or packaging.

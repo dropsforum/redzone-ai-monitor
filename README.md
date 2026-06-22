@@ -44,7 +44,7 @@ The Mac version intentionally does not use Tauri or Electron. It uses the faster
 ### Run locally
 
 ```bash
-/Users/javandermeulen/.local/bin/python3.11 -m venv .venv-mac
+python3.11 -m venv .venv-mac
 source .venv-mac/bin/activate
 python -m pip install -r requirements_ai.txt
 python run_ai_app.py
@@ -65,9 +65,10 @@ npm run mac:native:build
 npm run mac:native:dmg
 ```
 
-The build script uses `Developer ID Application: DrillingVR Pte Ltd (P86GW426XK)` if it is available in the local keychain. Notarization is prepared but requires Apple credentials:
+Set `MACOS_CODESIGN_IDENTITY` to a local Developer ID identity before building if you want the `.app` and `.dmg` signed. Notarization is prepared but requires Apple credentials:
 
 ```bash
+MACOS_CODESIGN_IDENTITY="Developer ID Application: Your Organization (TEAMID)" npm run mac:native:build
 APPLE_NOTARY_PROFILE="profile-name" npm run mac:native:notarize
 ```
 
@@ -86,19 +87,35 @@ The app bundle includes `NSCameraUsageDescription` and the camera entitlement in
 
 - `src/components`: UI components (video source, Zone Editor, Overlays).
 - `src/lib`: Core logic (YOLO detector, zone checking, alert management).
-- `public/models`: Pre-trained YOLO26 ONNX model.
+- `public/models`: Local model output directory. Model binaries are intentionally not committed.
 - `public/wasm`: WebAssembly files for ONNX Runtime.
 
 ## AI Model & Runtime Provenance
 
 - Model file: `public/models/yolo26n.onnx`
-- Source model: `yolo26n.pt` from Ultralytics assets
-- Export date: 2026-06-16
+- Source model: `yolo26n.pt` from Ultralytics assets, downloaded/exported locally by each user
+- Model binaries: intentionally excluded from this public repository
 - Export toolchain: `ultralytics==8.4.68`, `onnx==1.20.0`, Python 3.12
 - Export command: `YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)`
 - Expected input shape: `(1, 3, 640, 640)`
 - Expected output shape: `(1, 300, 6)`
 - Browser runtime: `onnxruntime-web@1.26.0`; files in `public/wasm` are copied from `node_modules/onnxruntime-web/dist`.
+
+Generate the browser model locally before running detection:
+
+```bash
+python -m pip install ultralytics onnx
+python - <<'PY'
+from pathlib import Path
+from ultralytics import YOLO
+
+exported = YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)
+Path("public/models").mkdir(parents=True, exist_ok=True)
+Path(exported).replace("public/models/yolo26n.onnx")
+PY
+```
+
+Ultralytics models and tooling have their own license terms. Users are responsible for confirming that their intended use, especially production or commercial deployment, complies with those terms.
 
 ## 📄 Integration & Documentation
 

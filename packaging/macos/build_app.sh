@@ -5,7 +5,7 @@ APP_NAME="DROPS Red Zone Monitoring"
 APP_PATH="dist/${APP_NAME}.app"
 SIGNED_APP_DIR="${SIGNED_APP_DIR:-/tmp/redzone-mac-sign}"
 SIGNED_APP_PATH="${SIGNED_APP_PATH:-${SIGNED_APP_DIR}/${APP_NAME}.app}"
-IDENTITY="${MACOS_CODESIGN_IDENTITY:-Developer ID Application: DrillingVR Pte Ltd (P86GW426XK)}"
+IDENTITY="${MACOS_CODESIGN_IDENTITY:-}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 VENV_DIR="${MACOS_BUILD_VENV:-/tmp/redzone-mac-venv}"
 
@@ -66,7 +66,7 @@ ditto --norsrc --noextattr "$APP_PATH" "$SIGNED_APP_PATH"
 find "$SIGNED_APP_PATH" -name ".DS_Store" -delete
 codesign --remove-signature "$SIGNED_APP_PATH" 2>/dev/null || true
 
-if security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
+if [[ -n "$IDENTITY" ]] && security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
   echo "Signing $SIGNED_APP_PATH with $IDENTITY"
   codesign \
     --force \
@@ -77,7 +77,8 @@ if security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
     "$SIGNED_APP_PATH"
   codesign --verify --deep --strict --verbose=2 "$SIGNED_APP_PATH"
 else
-  echo "Warning: signing identity not found: $IDENTITY"
+  echo "Warning: signing identity not configured or not found."
+  echo "Set MACOS_CODESIGN_IDENTITY to sign the app."
   echo "Built unsigned app at $APP_PATH"
   echo "Clean unsigned staging copy: $SIGNED_APP_PATH"
 fi
