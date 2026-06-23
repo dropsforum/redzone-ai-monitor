@@ -1,8 +1,16 @@
 # DROPS Red Zone Monitoring
 
+DROPS Red Zone Monitoring is a prototype application exploring how local AI and computer vision can support Exposure Zone Management.
+
+The project is based on a simple principle: monitoring should help organizations challenge access, not merely administer it. A person entering a red zone, restricted access zone, or other line-of-fire exposure area should not be treated as normal simply because entry can be detected, alarmed, or recorded. The stronger question is whether the work could have been designed so that entry was avoided, reduced, shortened, delayed, or better controlled in the first place.
+
+This app is therefore not intended to make entry into hazardous areas acceptable. It is intended to help teams verify whether controls are working, detect unauthorized or unexpected presence, and identify exposure patterns that should trigger learning and improvement.
+
+In the context of DROPS Exposure Zone Management, AI monitoring can support assurance by helping teams see where exposure occurs, whether access rules are being followed, and where repeated entry may indicate a deeper planning or design issue. The goal is not better permission to enter danger. The goal is better evidence to reduce the need for entry.
+
 This repository contains two DROPS Red Zone Monitoring targets:
 
-- **Web app**: a Next.js browser POC that runs YOLO26 with ONNX Runtime Web.
+- **Web app**: a Next.js browser proof of concept that runs YOLO26 with ONNX Runtime Web.
 - **Mac desktop app**: a high-performance native Python/OpenCV/Ultralytics app packaged with PyInstaller.
 
 ## 🚀 Getting Started
@@ -74,6 +82,12 @@ APPLE_NOTARY_PROFILE="profile-name" npm run mac:native:notarize
 
 The app bundle includes `NSCameraUsageDescription` and the camera entitlement in `packaging/macos/Entitlements.plist`.
 
+## Intended Use
+
+This prototype is intended for demonstration, learning, and evaluation. It may help illustrate how computer vision, configurable zones, local inference, and visual alerts can support exposure-zone discussions.
+
+It should not be used as the only control for hazardous work. Any operational use would require site-specific risk assessment, validation, governance, privacy review, human response arrangements, and integration with existing permit, authorization, and stop-work processes.
+
 ## 📦 Features
 
 - **Real-time AI Detection**: Runs YOLO26 directly in your browser using ONNX Runtime Web.
@@ -82,6 +96,14 @@ The app bundle includes `NSCameraUsageDescription` and the camera entitlement in
 - **Custom Zones**: Draw and edit monitoring zones directly on the live camera feed.
 - **Visual Alerts**: On-screen indicators and sound alerts when someone enters a "Red Zone".
 - **Privacy First**: All processing happens locally on your device. No video data is sent to any server.
+
+## Design Principles
+
+- **Challenge access first**: monitoring should support the question of whether entry is necessary.
+- **Assure controls**: detections and alerts should help verify whether access controls are working.
+- **Learn from patterns**: repeated or normalized entry should trigger review of the work method.
+- **Keep processing local**: video analysis is designed to run on the user's device.
+- **Do not normalize exposure**: technology should help reduce exposure, not justify it.
 
 ## 🛠 Project Structure
 
