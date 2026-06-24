@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -23,18 +24,23 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
     QPushButton,
     QSizePolicy,
     QSlider,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from .ai_detector import AIDetector
 from .alert_system import AlertSystem
+from .breach_recorder import BreachRecorder, format_duration
 from .camera_manager import CameraManager
 from .config import Config
 
@@ -359,6 +365,10 @@ class RedZoneQtWindow(QMainWindow):
         self.audio_enabled = True
         self.traffic = "green"
         self.warning_buffer = 0.10
+        self.breach_recorder = BreachRecorder()
+        self.breach_mode = "minute"
+        self.breach_report_type = "records"
+        self.last_breach_table_sync = 0.0
         self.frame_count = 0
         self.last_fps = time.monotonic()
         self.last_detection_at = 0.0
@@ -515,6 +525,67 @@ class RedZoneQtWindow(QMainWindow):
         controls.addWidget(self.info_stack)
         layout.addWidget(self.control_bar)
 
+        self.breach_bar = QFrame()
+        self.breach_bar.setObjectName("controlBar")
+        self.breach_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.breach_bar.setMaximumHeight(52)
+        breach_layout = QHBoxLayout(self.breach_bar)
+        breach_layout.setContentsMargins(8, 6, 8, 6)
+        breach_layout.setSpacing(8)
+        breach_title = QLabel("▥ Breach Time")
+        breach_title.setObjectName("compactLabel")
+        self.breach_mode_combo = QComboBox()
+        self.breach_mode_combo.addItem("Minute", "minute")
+        self.breach_mode_combo.addItem("Hour", "hour")
+        self.breach_mode_combo.currentIndexChanged.connect(self._set_breach_mode)
+        self.breach_mode_combo.setEnabled(False)
+        self.breach_metric = QLabel("Breach 0s · Rate 0% · Records 0/0")
+        self.breach_metric.setObjectName("metric")
+        self.breach_state = QLabel("Current: Clear")
+        self.breach_state.setObjectName("compactLabel")
+        self.breach_reset_btn = QPushButton("↺")
+        self.breach_reset_btn.setToolTip("Reset breach recording")
+        self.breach_reset_btn.clicked.connect(self._reset_breach_recording)
+        self.breach_export_btn = QPushButton("XLSX")
+        self.breach_export_btn.setToolTip("Export Excel workbook with Records, Aggregated Results, and Overall Metrics tabs")
+        self.breach_export_btn.clicked.connect(self._export_breach_excel)
+        breach_layout.addWidget(breach_title)
+        breach_layout.addWidget(self.breach_mode_combo)
+        breach_layout.addWidget(self.breach_metric, 1)
+        breach_layout.addWidget(self.breach_state)
+        breach_layout.addWidget(self.breach_reset_btn)
+        breach_layout.addWidget(self.breach_export_btn)
+        layout.addWidget(self.breach_bar)
+
+        self.breach_report_panel = QFrame()
+        self.breach_report_panel.setObjectName("controlBar")
+        self.breach_report_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.breach_report_panel.setMaximumHeight(230)
+        report_layout = QVBoxLayout(self.breach_report_panel)
+        report_layout.setContentsMargins(8, 8, 8, 8)
+        report_layout.setSpacing(6)
+
+        self.breach_tabs = QTabWidget()
+        self.breach_tabs.currentChanged.connect(self._set_breach_report_tab)
+        self.records_table = self._make_report_table([
+            "State",
+            "Start",
+            "End",
+            "Duration",
+        ])
+        self.metrics_table = self._make_report_table([
+            "Bucket Start",
+            "Bucket End",
+            "Breach",
+            "No Breach",
+            "Total",
+            "Breach %",
+        ])
+        self.breach_tabs.addTab(self.records_table, "Records")
+        self.breach_tabs.addTab(self.metrics_table, "Metrics")
+        report_layout.addWidget(self.breach_tabs)
+        layout.addWidget(self.breach_report_panel)
+
         self.setStyleSheet(f"""
             QWidget {{ background: white; color: {SLATE_800}; font-family: "Arial"; }}
             QLabel#title {{ color: {ACCENT}; font-size: 17px; font-weight: 900; font-style: italic; }}
@@ -529,6 +600,11 @@ class RedZoneQtWindow(QMainWindow):
             QPushButton:disabled {{ background:{SLATE_100}; color:{SLATE_400}; border-color:{SLATE_200}; }}
             QFrame#controlBar {{ background:{SLATE_50}; border:1px solid {SLATE_100}; border-radius:10px; }}
             QFrame#card {{ background:white; border:1px solid {SLATE_100}; border-radius:16px; }}
+            QTabWidget::pane {{ border:1px solid {SLATE_100}; border-radius:8px; background:white; }}
+            QTabBar::tab {{ background:{SLATE_50}; color:{SLATE_400}; padding:6px 14px; border:1px solid {SLATE_100}; border-bottom:0; font-size:10px; font-weight:900; }}
+            QTabBar::tab:selected {{ background:white; color:{ACCENT}; }}
+            QTableWidget {{ background:white; border:0; gridline-color:{SLATE_100}; font-size:10px; }}
+            QHeaderView::section {{ background:{SLATE_50}; color:{SLATE_400}; border:0; border-bottom:1px solid {SLATE_100}; padding:5px; font-size:9px; font-weight:900; }}
             QSlider::groove:horizontal {{ height:6px; background:{SLATE_100}; border-radius:3px; }}
             QSlider::handle:horizontal {{ background:{ACCENT}; width:18px; margin:-6px 0; border-radius:9px; }}
             QComboBox {{ background:white; border:1px solid {SLATE_100}; border-radius:8px; padding:5px 8px; font-size:10px; }}
@@ -554,6 +630,8 @@ class RedZoneQtWindow(QMainWindow):
             self._normal_geometry = self.geometry()
             self.header_widget.setVisible(False)
             self.control_bar.setVisible(False)
+            self.breach_bar.setVisible(False)
+            self.breach_report_panel.setVisible(False)
             self.root_layout.setContentsMargins(0, 0, 0, 0)
             self.content_layout.setSpacing(0)
             self.video_panel.setStyleSheet("background:black; border:0; border-radius:0;")
@@ -561,6 +639,8 @@ class RedZoneQtWindow(QMainWindow):
         else:
             self.header_widget.setVisible(True)
             self.control_bar.setVisible(True)
+            self.breach_bar.setVisible(True)
+            self.breach_report_panel.setVisible(True)
             self.root_layout.setContentsMargins(10, 10, 10, 10)
             self.content_layout.setSpacing(8)
             self.video_panel.setStyleSheet(
@@ -589,6 +669,18 @@ class RedZoneQtWindow(QMainWindow):
         label.setStyleSheet(f"color:{SLATE_400}; font-size:10px; font-weight:900;")
         layout.addWidget(label)
         return frame
+
+    def _make_report_table(self, headers: list[str]) -> QTableWidget:
+        table = QTableWidget(0, len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setMinimumHeight(150)
+        return table
 
     def _load_zone(self):
         if self.config.zone_points:
@@ -640,6 +732,7 @@ class RedZoneQtWindow(QMainWindow):
         self.camera.start()
         self.video_panel.set_state(source_mode=self.source_mode, video_label=self.video_path.name if self.video_path else "")
         self._sync_controls()
+        self._sync_breach_ui(force_tables=True)
 
     def _load_video_file(self, path: Path):
         self.video_path = path
@@ -663,6 +756,10 @@ class RedZoneQtWindow(QMainWindow):
         if not self.detector.is_loaded or len(self.zone) < 3 or self.current_frame is None:
             return
         self.is_monitoring = not self.is_monitoring
+        if self.is_monitoring:
+            self.breach_recorder.start()
+        else:
+            self.breach_recorder.stop()
         if self.source_mode == "file":
             if self.is_monitoring:
                 self.camera.start_playback(restart=True)
@@ -671,6 +768,7 @@ class RedZoneQtWindow(QMainWindow):
         if not self.is_monitoring:
             self.traffic = "green"
         self._sync_controls()
+        self._sync_breach_ui(force_tables=True)
 
     def _toggle_drawing(self):
         if self.current_frame is None:
@@ -678,6 +776,7 @@ class RedZoneQtWindow(QMainWindow):
         self.is_drawing = not self.is_drawing
         if self.is_drawing:
             self.is_monitoring = False
+            self.breach_recorder.stop()
             if self.source_mode == "file":
                 self.camera.pause_playback()
         else:
@@ -687,6 +786,7 @@ class RedZoneQtWindow(QMainWindow):
     def _reset_zone(self):
         self.is_monitoring = False
         self.is_drawing = False
+        self.breach_recorder.reset()
         if self.source_mode == "file":
             self.camera.pause_playback()
         self.zone = []
@@ -702,6 +802,7 @@ class RedZoneQtWindow(QMainWindow):
             traffic="green",
         )
         self._sync_controls()
+        self._sync_breach_ui(force_tables=True)
 
     def _reset_runtime(self):
         self.is_monitoring = False
@@ -710,6 +811,7 @@ class RedZoneQtWindow(QMainWindow):
         self.fps = 0
         self.frame_count = 0
         self.current_frame = None
+        self.breach_recorder.reset()
 
     def _sync_controls(self):
         ready = self.detector.is_loaded
@@ -721,6 +823,94 @@ class RedZoneQtWindow(QMainWindow):
         self.draw_btn.setText("✓ SAVE" if self.is_drawing else "✎ ZONE")
         self.reset_zone_btn.setEnabled(bool(self.zone) or self.is_drawing)
         self.screenshot_btn.setEnabled(self.current_frame is not None)
+
+    def _set_breach_mode(self, *_args):
+        self.breach_mode = self.breach_mode_combo.currentData() or "minute"
+        self._sync_breach_ui(force_tables=True)
+
+    def _set_breach_report_tab(self, index: int):
+        self.breach_report_type = "metrics" if index == 1 else "records"
+        self.breach_mode_combo.setEnabled(self.breach_report_type == "metrics")
+        self._sync_breach_ui(force_tables=True)
+
+    def _reset_breach_recording(self):
+        was_monitoring = self.is_monitoring
+        self.breach_recorder.reset()
+        if was_monitoring:
+            self.breach_recorder.start()
+        self._sync_breach_ui(force_tables=True)
+
+    def _export_breach_excel(self):
+        default_name = f"drops-breach-report-{int(time.time())}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Breach Report",
+            str(Path.home() / default_name),
+            "Excel Workbook (*.xlsx)",
+        )
+        if path:
+            self.breach_recorder.export_excel(Path(path), self.breach_mode)
+
+    def _sync_breach_ui(self, force_tables: bool = False):
+        summary = self.breach_recorder.summary(self.breach_mode)
+        self.breach_metric.setText(
+            f"Breach {format_duration(float(summary['breach_seconds']))} · "
+            f"Rate {summary['breach_percent']:.0f}% · "
+            f"Records {summary['breach_count']}/{summary['clear_count']}"
+        )
+        current = "Breach" if summary["current_state"] == "breach" else "Clear"
+        suffix = ""
+        if summary["current_state"] == "breach":
+            suffix = f" {format_duration(float(summary['active_breach_seconds']))}"
+        self.breach_state.setText(f"Current: {current}{suffix}")
+        now = time.monotonic()
+        if force_tables or now - self.last_breach_table_sync >= 1.0:
+            self.last_breach_table_sync = now
+            self._sync_breach_tables()
+
+    def _sync_breach_tables(self):
+        segments = self.breach_recorder.segments()[-200:]
+        self.records_table.setRowCount(len(segments))
+        for row, segment in enumerate(segments):
+            state_label = "BREACH" if segment.state == "breach" else "NO BREACH"
+            duration = format_duration(segment.end - segment.start)
+            values = [
+                state_label,
+                self._format_timestamp(segment.start),
+                self._format_timestamp(segment.end),
+                duration,
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setForeground(QColor(RED if segment.state == "breach" else "#16a34a"))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                self.records_table.setItem(row, column, item)
+
+        buckets = self.breach_recorder.buckets(self.breach_mode)[-200:]
+        self.metrics_table.setRowCount(len(buckets))
+        for row, bucket in enumerate(buckets):
+            values = [
+                self._format_timestamp(bucket.start),
+                self._format_timestamp(bucket.end),
+                f"{bucket.breach_seconds:.2f}s",
+                f"{bucket.clear_seconds:.2f}s",
+                f"{bucket.total_seconds:.2f}s",
+                f"{bucket.breach_percent:.2f}%",
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 2:
+                    item.setForeground(QColor(RED))
+                elif column == 3:
+                    item.setForeground(QColor("#16a34a"))
+                self.metrics_table.setItem(row, column, item)
+
+    @staticmethod
+    def _format_timestamp(timestamp: float) -> str:
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
     def _tick(self):
         if self.load_future is not None and self.load_future.done():
@@ -754,6 +944,7 @@ class RedZoneQtWindow(QMainWindow):
         )
         self.zone = self.video_panel.zone
         self._sync_controls()
+        self._sync_breach_ui()
 
     def _maybe_detect(self, frame: np.ndarray):
         now = time.monotonic()
@@ -772,6 +963,7 @@ class RedZoneQtWindow(QMainWindow):
     def _evaluate_alerts(self, frame: np.ndarray):
         if not self.detections:
             self.traffic = "green"
+            self.breach_recorder.update(False)
             return
         h, w = frame.shape[:2]
         abs_zone = [(int(x * w), int(y * h)) for x, y in self.zone]
@@ -791,10 +983,12 @@ class RedZoneQtWindow(QMainWindow):
                 yellow_hit = True
         if red_hit:
             self.traffic = "red"
+            self.breach_recorder.update(True)
             if self.audio_enabled:
                 self.alert.trigger_alert()
         else:
             self.traffic = "yellow" if yellow_hit else "green"
+            self.breach_recorder.update(False)
 
     def _screenshot(self):
         if self.current_frame is None:

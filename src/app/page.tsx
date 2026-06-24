@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor, Video, UploadCloud } from 'lucide-react';
+import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor, Video, UploadCloud, BarChart3, Download } from 'lucide-react';
 import VideoFrameSource, { VideoFrameRect, VideoFrameSourceHandle, VideoSourceMode } from '../components/VideoFrameSource';
 import ZoneEditor, { Point } from '../components/ZoneEditor';
 import DetectionOverlay from '../components/DetectionOverlay';
@@ -10,6 +10,17 @@ import TrafficLight, { TrafficLightState } from '../components/TrafficLight';
 import { YoloDetector, Detection } from '../lib/yolo-detector';
 import { isPersonInZone, isPersonNearZone } from '../lib/zone-checker';
 import { AlertManager } from '../lib/alert-manager';
+import {
+  BreachAggregateMode,
+  BreachRecorder,
+  BreachSnapshot,
+  breachMetricsToCsv,
+  breachSegmentsToCsv,
+  formatBucketLabel,
+  formatDuration,
+} from '../lib/breach-recorder';
+
+type BreachReportTab = 'records' | 'metrics';
 
 function HomeContent() {
   // App State
@@ -19,6 +30,7 @@ function HomeContent() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isMobileMode] = useState(() => (
     typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
@@ -41,16 +53,24 @@ function HomeContent() {
   
   // Detection Settings
   const [warningBuffer, setWarningBuffer] = useState(0.1); // normalized distance 0.0 - 0.3
+  const [breachAggregateMode, setBreachAggregateMode] = useState<BreachAggregateMode>('minute');
+  const [breachReportTab, setBreachReportTab] = useState<BreachReportTab>('records');
 
   // Refs
   const detectorRef = useRef<YoloDetector | null>(null);
   const alertManagerRef = useRef<AlertManager>(new AlertManager(5));
+  const breachRecorderRef = useRef<BreachRecorder>(new BreachRecorder());
   const videoSourceRef = useRef<VideoFrameSourceHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoObjectUrlRef = useRef<string | null>(null);
   const lastProcessedTimeRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const lastFpsUpdateRef = useRef<number>(0);
+  const [breachSnapshot, setBreachSnapshot] = useState<BreachSnapshot>(() => new BreachRecorder().snapshot('minute'));
+
+  const refreshBreachSnapshot = useCallback(() => {
+    setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
+  }, [breachAggregateMode]);
 
   const resetRuntimeState = useCallback(() => {
     setIsMonitoring(false);
@@ -62,7 +82,19 @@ function HomeContent() {
     frameCountRef.current = 0;
     lastProcessedTimeRef.current = 0;
     lastFpsUpdateRef.current = 0;
-  }, []);
+    breachRecorderRef.current.reset();
+    setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
+  }, [breachAggregateMode]);
+
+  useEffect(() => {
+    refreshBreachSnapshot();
+  }, [refreshBreachSnapshot]);
+
+  useEffect(() => {
+    if (!isMonitoring) return;
+    const timer = window.setInterval(refreshBreachSnapshot, 1000);
+    return () => window.clearInterval(timer);
+  }, [isMonitoring, refreshBreachSnapshot]);
 
   const clearRecordedVideo = useCallback(() => {
     if (videoObjectUrlRef.current) {
@@ -99,6 +131,19 @@ function HomeContent() {
     if (!file) return;
     loadRecordedVideo(file);
   }, [loadRecordedVideo]);
+
+  const exportBreachCsv = useCallback(() => {
+    const csv = breachReportTab === 'records'
+      ? breachSegmentsToCsv(breachSnapshot.segments)
+      : breachMetricsToCsv(breachSnapshot, breachAggregateMode);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `drops-breach-${breachReportTab}-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [breachAggregateMode, breachReportTab, breachSnapshot]);
 
   useEffect(() => {
     return () => {
@@ -225,10 +270,16 @@ function HomeContent() {
   // Initialize Detector
   useEffect(() => {
     const init = async () => {
-      const detector = new YoloDetector();
-      await detector.init('/models/yolo26n.onnx');
-      detectorRef.current = detector;
-      setIsModelLoaded(true);
+      try {
+        const detector = new YoloDetector();
+        await detector.init('/models/yolo26n.onnx');
+        detectorRef.current = detector;
+        setIsModelLoaded(true);
+        setModelError(null);
+      } catch (error) {
+        console.error('[APP] Failed to initialize detector:', error);
+        setModelError('Generate public/models/yolo26n.onnx before monitoring.');
+      }
     };
     void init();
   }, []);
@@ -254,9 +305,11 @@ function HomeContent() {
       detectorRef.current.detect(canvas).then(results => {
         setDetections(results);
         
+        let personInZone = false;
+
         // Check for zone alerts
         if (zone.length >= 3 && results.length > 0) {
-          const personInZone = results.some(det => {
+          personInZone = results.some(det => {
             const inZone = isPersonInZone(det, zone, canvas.width, canvas.height, true);
             return inZone;
           });
@@ -274,6 +327,9 @@ function HomeContent() {
           setTrafficLightState('green');
         }
 
+        breachRecorderRef.current.update(personInZone, Date.now());
+        refreshBreachSnapshot();
+
         // FPS Calculation
         frameCountRef.current++;
         if (now - lastFpsUpdateRef.current >= 1000) {
@@ -283,7 +339,7 @@ function HomeContent() {
         }
       });
     }
-  }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions, warningBuffer]);
+  }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions, warningBuffer, refreshBreachSnapshot]);
 
   const overlayStyle: React.CSSProperties = {
     left: frameRect.left,
@@ -304,7 +360,7 @@ function HomeContent() {
             </h1>
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
               <Cpu className="w-3 h-3 text-[#55799a]" />
-              <span className="text-[10px] font-bold uppercase text-slate-600">{isModelLoaded ? 'AI Ready' : 'Loading...'}</span>
+              <span className="text-[10px] font-bold uppercase text-slate-600">{isModelLoaded ? 'AI Ready' : modelError ? 'Model Missing' : 'Loading...'}</span>
             </div>
           </div>
           <p className="text-slate-400 text-[10px] font-mono flex items-center gap-2 uppercase tracking-widest">
@@ -405,8 +461,13 @@ function HomeContent() {
             {/* Empty State / Loading */}
             {!isModelLoaded && (
               <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-[60] flex flex-col items-center justify-center">
-                <div className="w-10 h-10 border-4 border-[#55799a] border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="text-[#55799a] font-black tracking-widest uppercase text-xs">Initializing AI</p>
+                {!modelError && <div className="w-10 h-10 border-4 border-[#55799a] border-t-transparent rounded-full animate-spin mb-4" />}
+                <p className="text-[#55799a] font-black tracking-widest uppercase text-xs">{modelError ? 'Model Missing' : 'Initializing AI'}</p>
+                {modelError && (
+                  <p className="mt-2 max-w-xs text-center text-[10px] leading-relaxed text-slate-400">
+                    {modelError}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -442,7 +503,13 @@ function HomeContent() {
                 }
 
                 setIsMonitoring(nextMonitoring);
-                if (!nextMonitoring) setTrafficLightState('green');
+                if (nextMonitoring) {
+                  breachRecorderRef.current.start(Date.now());
+                } else {
+                  breachRecorderRef.current.stop(Date.now());
+                  setTrafficLightState('green');
+                }
+                refreshBreachSnapshot();
               }}
               disabled={!isModelLoaded || zone.length < 3 || !hasActiveVideoSource}
               className={`flex-1 min-w-[140px] h-12 flex items-center justify-center gap-2 rounded-xl font-bold transition-all ${
@@ -496,6 +563,215 @@ function HomeContent() {
               <span>Test Sound</span>
             </button>
           </div>
+        </div>
+
+        {/* Breach Recording */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-[#55799a]" />
+              <div>
+                <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Breach Time</h2>
+                <p className="text-[9px] text-slate-400">Records breach and no-breach periods with dated start and end times.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  breachRecorderRef.current.reset();
+                  if (isMonitoring) breachRecorderRef.current.start(Date.now());
+                  setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
+                }}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-100 text-[#55799a] hover:bg-slate-50"
+                title="Reset breach recording"
+              >
+                <RefreshCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={exportBreachCsv}
+                disabled={breachSnapshot.segments.length === 0}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-100 text-[#55799a] hover:bg-slate-50 disabled:opacity-40"
+                title={`Export ${breachReportTab} CSV`}
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm">
+            {(['records', 'metrics'] as BreachReportTab[]).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setBreachReportTab(tab)}
+                className={`h-8 px-3 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                  breachReportTab === tab ? 'bg-white text-[#55799a] shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {breachReportTab === 'records' ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-red-50 border border-red-100 p-3">
+                  <div className="text-[8px] uppercase tracking-widest font-black text-red-300">Breach Records</div>
+                  <div className="text-lg font-black text-red-500">{breachSnapshot.breachCount}</div>
+                </div>
+                <div className="rounded-xl bg-green-50 border border-green-100 p-3">
+                  <div className="text-[8px] uppercase tracking-widest font-black text-green-400">No-Breach Records</div>
+                  <div className="text-lg font-black text-green-600">{breachSnapshot.clearCount}</div>
+                </div>
+              </div>
+
+              <div className="max-h-56 overflow-auto rounded-xl border border-slate-100">
+                <table className="w-full text-left text-[9px]">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-400 uppercase tracking-widest">
+                    <tr>
+                      <th className="px-3 py-2">State</th>
+                      <th className="px-3 py-2">Start</th>
+                      <th className="px-3 py-2">End</th>
+                      <th className="px-3 py-2 text-right">Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-slate-500">
+                    {breachSnapshot.segments.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-8 text-center uppercase tracking-widest text-slate-300 font-black">
+                          Start monitoring to record breach and no-breach periods
+                        </td>
+                      </tr>
+                    ) : (
+                      breachSnapshot.segments.slice(-20).map((segment, index) => (
+                        <tr key={`${segment.startMs}-${index}`} className="border-t border-slate-100">
+                          <td className={`px-3 py-2 font-black ${segment.state === 'breach' ? 'text-red-500' : 'text-green-600'}`}>
+                            {segment.state === 'breach' ? 'BREACH' : 'NO BREACH'}
+                          </td>
+                          <td className="px-3 py-2">{new Date(segment.startMs).toLocaleString()}</td>
+                          <td className="px-3 py-2">{new Date(segment.endMs).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right">{formatDuration(segment.endMs - segment.startMs)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <select
+                  value={breachAggregateMode}
+                  onChange={(event) => setBreachAggregateMode(event.target.value as BreachAggregateMode)}
+                  className="h-8 bg-slate-50 border border-slate-100 rounded-lg px-2 text-[10px] font-mono text-slate-600 outline-none focus:ring-1 focus:ring-[#55799a]"
+                >
+                  <option value="minute">Minute</option>
+                  <option value="hour">Hour</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-[8px] uppercase tracking-widest font-black text-slate-400">Breach</div>
+                  <div className="text-lg font-black text-red-500">{formatDuration(breachSnapshot.totalBreachMs)}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-[8px] uppercase tracking-widest font-black text-slate-400">Rate</div>
+                  <div className="text-lg font-black text-[#55799a]">
+                    {breachSnapshot.totalMs > 0 ? `${Math.round((breachSnapshot.totalBreachMs / breachSnapshot.totalMs) * 100)}%` : '0%'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-[8px] uppercase tracking-widest font-black text-slate-400">Observed</div>
+                  <div className="text-lg font-black text-slate-700">{formatDuration(breachSnapshot.totalMs)}</div>
+                </div>
+              </div>
+
+              <div className="h-32 rounded-xl border border-slate-100 bg-slate-50 px-3 pt-3 pb-7">
+                {breachSnapshot.buckets.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-[10px] uppercase tracking-widest font-black text-slate-300">
+                    Start monitoring to produce metrics
+                  </div>
+                ) : (
+                  <div className="h-full flex items-end gap-1">
+                    {breachSnapshot.buckets.slice(-18).map((bucket) => (
+                      <div key={bucket.startMs} className="relative flex-1 h-full flex items-end">
+                        <div className="absolute inset-x-0 bottom-0 bg-slate-200/70 rounded-t-sm" style={{ height: `${Math.max(3, (bucket.totalMs / (breachAggregateMode === 'hour' ? 3_600_000 : 60_000)) * 100)}%` }} />
+                        <div className="absolute inset-x-0 bottom-0 bg-red-500 rounded-t-sm" style={{ height: `${Math.max(bucket.breachMs > 0 ? 3 : 0, bucket.breachPercent)}%` }} />
+                        <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[7px] font-mono text-slate-400 whitespace-nowrap">
+                          {formatBucketLabel(bucket.startMs, breachAggregateMode)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                    Aggregated Report
+                  </h3>
+                  <span className="text-[8px] font-mono uppercase tracking-widest text-slate-300">
+                    By {breachAggregateMode}
+                  </span>
+                </div>
+                <div className="max-h-56 overflow-auto rounded-xl border border-slate-100">
+                  <table className="w-full text-left text-[9px]">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-400 uppercase tracking-widest">
+                      <tr>
+                        <th className="px-3 py-2">Bucket Start</th>
+                        <th className="px-3 py-2">Bucket End</th>
+                        <th className="px-3 py-2 text-right">Breach</th>
+                        <th className="px-3 py-2 text-right">No Breach</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                        <th className="px-3 py-2 text-right">Breach %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="font-mono text-slate-500">
+                      {breachSnapshot.buckets.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-8 text-center uppercase tracking-widest text-slate-300 font-black">
+                            No aggregated report yet
+                          </td>
+                        </tr>
+                      ) : (
+                        breachSnapshot.buckets.slice(-60).map((bucket) => (
+                          <tr key={bucket.startMs} className="border-t border-slate-100">
+                            <td className="px-3 py-2">{new Date(bucket.startMs).toLocaleString()}</td>
+                            <td className="px-3 py-2">{new Date(bucket.endMs).toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right text-red-500 font-black">{(bucket.breachMs / 1000).toFixed(2)}s</td>
+                            <td className="px-3 py-2 text-right text-green-600 font-black">{(bucket.clearMs / 1000).toFixed(2)}s</td>
+                            <td className="px-3 py-2 text-right">{(bucket.totalMs / 1000).toFixed(2)}s</td>
+                            <td className="px-3 py-2 text-right">{bucket.breachPercent.toFixed(2)}%</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[9px] font-mono text-slate-400">
+                <span className="px-2 py-1 rounded-lg border border-slate-100 bg-slate-50">
+                  Period start: {breachSnapshot.periodStartMs ? new Date(breachSnapshot.periodStartMs).toLocaleString() : 'None'}
+                </span>
+                <span className="px-2 py-1 rounded-lg border border-slate-100 bg-slate-50">
+                  Period end: {breachSnapshot.periodEndMs ? new Date(breachSnapshot.periodEndMs).toLocaleString() : 'None'}
+                </span>
+                <span className={`px-2 py-1 rounded-lg border ${breachSnapshot.currentState === 'breach' ? 'bg-red-50 text-red-500 border-red-100' : 'bg-green-50 text-green-600 border-green-100'}`}>
+                  Current: {breachSnapshot.currentState === 'breach' ? `Breach ${formatDuration(breachSnapshot.activeBreachMs)}` : 'Clear'}
+                </span>
+                <span className="px-2 py-1 rounded-lg border border-slate-100 bg-slate-50">
+                  Clear: {formatDuration(breachSnapshot.totalClearMs)}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Info & Settings Section */}

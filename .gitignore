@@ -26,6 +26,7 @@
 /public/models/*.onnx
 /models/*.pt
 /*.pt
+/*.onnx
 /*.dmg
 __pycache__/
 **/__pycache__/
