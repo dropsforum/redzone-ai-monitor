@@ -494,6 +494,10 @@ function HomeContent() {
                 await alertManagerRef.current.unlockAudio();
                 const nextMonitoring = !isMonitoring;
 
+                if (nextMonitoring) {
+                  setIsDrawing(false);
+                }
+
                 if (sourceMode === 'file') {
                   if (nextMonitoring) {
                     await videoSourceRef.current?.play().catch(e => console.error('[APP] Recorded video playback failed:', e));
