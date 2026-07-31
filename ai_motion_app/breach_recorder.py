@@ -1,15 +1,20 @@
-"""In-session red-zone breach duration recorder."""
+"""Persistent red-zone session, person-event, and report recorder."""
 
 from __future__ import annotations
 
 import csv
+import json
 import time
+import uuid
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from xml.sax.saxutils import escape
+
+from .platform_utils import get_app_data_dir
+from .session_store import SessionStore
 
 BreachState = Literal["clear", "breach"]
 AggregateMode = Literal["minute", "hour"]
@@ -40,30 +45,76 @@ class BreachBucket:
         return (self.breach_seconds / self.total_seconds) * 100.0
 
 
+@dataclass
+class PersonBreachEvent:
+    track_id: int
+    start: float
+    end: float
+    max_confidence: float
+
+
 class BreachRecorder:
-    def __init__(self):
+    def __init__(self, database_path: Path | None = None):
+        db_path = database_path or (get_app_data_dir() / "monitoring.sqlite3")
+        self.store = SessionStore(db_path)
         self.completed: list[BreachSegment] = []
         self.active: BreachSegment | None = None
+        self.completed_people: list[PersonBreachEvent] = []
+        self.active_people: dict[int, PersonBreachEvent] = {}
+        self._active_segment_row_id: int | None = None
+        self._active_person_row_ids: dict[int, int] = {}
+        self.session_id: str | None = self.store.latest_session_id()
+        self.metadata: dict[str, Any] = {}
         self.running = False
+        self._load_latest_session()
 
-    def start(self, now: float | None = None):
+    def start(
+        self,
+        now: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ):
         if self.running:
             return
         now = time.time() if now is None else now
+        self.completed.clear()
+        self.completed_people.clear()
+        self.active_people.clear()
+        self._active_person_row_ids.clear()
+        self.metadata = dict(metadata or {})
+        self.session_id = str(uuid.uuid4())
+        self.store.create_session(self.session_id, now, self.metadata)
         self.running = True
         self.active = BreachSegment(now, now, "clear")
+        self._active_segment_row_id = self.store.start_state_segment(
+            self.session_id,
+            "clear",
+            now,
+        )
 
     def stop(self, now: float | None = None):
         if not self.running:
             return
         now = time.time() if now is None else now
         self._close_active(now)
+        for track_id in list(self.active_people):
+            self.end_person_breach(track_id, now)
+        if self.session_id is not None:
+            self.store.finish_session(self.session_id, now)
         self.active = None
+        self._active_segment_row_id = None
         self.running = False
 
     def reset(self):
+        if self.running:
+            self.stop()
         self.completed.clear()
+        self.completed_people.clear()
+        self.active_people.clear()
         self.active = None
+        self._active_segment_row_id = None
+        self._active_person_row_ids.clear()
+        self.session_id = None
+        self.metadata = {}
         self.running = False
 
     def update(self, is_breach: bool, now: float | None = None):
@@ -79,6 +130,74 @@ class BreachRecorder:
             return
         self._close_active(now)
         self.active = BreachSegment(now, now, next_state)
+        if self.session_id is not None:
+            self._active_segment_row_id = self.store.start_state_segment(
+                self.session_id,
+                next_state,
+                now,
+            )
+
+    def start_person_breach(
+        self,
+        track_id: int,
+        start: float,
+        confidence: float,
+    ) -> None:
+        if not self.running or self.session_id is None:
+            return
+        if track_id in self.active_people:
+            self.update_person_confidence(track_id, confidence)
+            return
+        event = PersonBreachEvent(track_id, start, start, confidence)
+        self.active_people[track_id] = event
+        self._active_person_row_ids[track_id] = self.store.start_person_event(
+            self.session_id,
+            track_id,
+            start,
+            confidence,
+        )
+
+    def update_person_confidence(self, track_id: int, confidence: float) -> None:
+        event = self.active_people.get(track_id)
+        if event is None:
+            return
+        event.max_confidence = max(event.max_confidence, confidence)
+        row_id = self._active_person_row_ids.get(track_id)
+        if row_id is not None:
+            self.store.update_person_confidence(row_id, confidence)
+
+    def end_person_breach(
+        self,
+        track_id: int,
+        end: float,
+        confidence: float | None = None,
+    ) -> None:
+        event = self.active_people.pop(track_id, None)
+        row_id = self._active_person_row_ids.pop(track_id, None)
+        if event is None:
+            return
+        event.end = max(event.start, end)
+        if confidence is not None:
+            event.max_confidence = max(event.max_confidence, confidence)
+        self.completed_people.append(event)
+        if row_id is not None:
+            self.store.close_person_event(
+                row_id,
+                event.end,
+                event.max_confidence,
+            )
+
+    def heartbeat(
+        self,
+        now: float | None = None,
+        health: dict[str, Any] | None = None,
+    ) -> None:
+        if not self.running or self.session_id is None:
+            return
+        now = time.time() if now is None else now
+        if self.active is not None:
+            self.active.end = max(self.active.end, now)
+        self.store.heartbeat(self.session_id, now, health)
 
     def segments(self, now: float | None = None) -> list[BreachSegment]:
         now = time.time() if now is None else now
@@ -86,6 +205,24 @@ class BreachRecorder:
         if self.running and self.active is not None:
             segments.append(BreachSegment(self.active.start, max(self.active.end, now), self.active.state))
         return [segment for segment in segments if segment.end > segment.start]
+
+    def person_events(self, now: float | None = None) -> list[PersonBreachEvent]:
+        now = time.time() if now is None else now
+        events = list(self.completed_people)
+        events.extend(
+            PersonBreachEvent(
+                event.track_id,
+                event.start,
+                max(event.end, now),
+                event.max_confidence,
+            )
+            for event in self.active_people.values()
+        )
+        return [
+            event
+            for event in sorted(events, key=lambda item: item.start)
+            if event.end > event.start
+        ]
 
     def buckets(self, mode: AggregateMode, now: float | None = None) -> list[BreachBucket]:
         bucket_seconds = 60.0 if mode == "minute" else 3600.0
@@ -121,6 +258,8 @@ class BreachRecorder:
             "breach_percent": (breach_seconds / total_seconds * 100.0) if total_seconds > 0 else 0.0,
             "breach_count": sum(1 for segment in segments if segment.state == "breach"),
             "clear_count": sum(1 for segment in segments if segment.state == "clear"),
+            "person_breach_count": len(self.person_events()),
+            "unique_people": len({event.track_id for event in self.person_events()}),
             "current_state": current,
             "active_breach_seconds": active_breach_seconds,
             "bucket_count": len(self.buckets(mode)),
@@ -211,13 +350,41 @@ class BreachRecorder:
             ["breach_percent", round(float(summary["breach_percent"]), 2)],
             ["breach_record_count", int(summary["breach_count"])],
             ["no_breach_record_count", int(summary["clear_count"])],
+            ["person_breach_event_count", int(summary["person_breach_count"])],
+            ["unique_tracked_people", int(summary["unique_people"])],
         ]
+        people_rows = [
+            [
+                "track_id",
+                "start_datetime",
+                "end_datetime",
+                "start_iso",
+                "end_iso",
+                "duration_seconds",
+                "max_confidence",
+            ],
+            *[
+                [
+                    event.track_id,
+                    _local_datetime(event.start),
+                    _local_datetime(event.end),
+                    _iso_datetime(event.start),
+                    _iso_datetime(event.end),
+                    round(event.end - event.start, 2),
+                    round(event.max_confidence, 4),
+                ]
+                for event in self.person_events()
+            ],
+        ]
+        metadata_rows = self._metadata_rows()
         _write_xlsx(
             path,
             [
                 ("Records", records_rows),
+                ("Person Breaches", people_rows),
                 ("Aggregated Results", aggregated_rows),
                 ("Overall Metrics", metrics_rows),
+                ("Session Metadata", metadata_rows),
             ],
         )
 
@@ -225,6 +392,62 @@ class BreachRecorder:
         if self.active is None:
             return
         self.completed.append(BreachSegment(self.active.start, max(self.active.start, now), self.active.state))
+        if self._active_segment_row_id is not None:
+            self.store.close_state_segment(self._active_segment_row_id, now)
+            self._active_segment_row_id = None
+
+    def _load_latest_session(self) -> None:
+        if self.session_id is None:
+            return
+        self.metadata = self.store.session(self.session_id)
+        self.completed = [
+            BreachSegment(
+                float(row["start_time"]),
+                float(row["end_time"] or row["start_time"]),
+                str(row["state"]),
+            )
+            for row in self.store.state_segments(self.session_id)
+        ]
+        self.completed_people = [
+            PersonBreachEvent(
+                int(row["track_id"]),
+                float(row["start_time"]),
+                float(row["end_time"] or row["start_time"]),
+                float(row["max_confidence"]),
+            )
+            for row in self.store.person_events(self.session_id)
+        ]
+
+    def _metadata_rows(self) -> list[list[object]]:
+        metadata = self.store.session(self.session_id) if self.session_id else self.metadata
+        health = self.store.health_summary(self.session_id) if self.session_id else {}
+        rows: list[list[object]] = [["field", "value"]]
+        preferred = [
+            "id",
+            "status",
+            "start_time",
+            "end_time",
+            "last_heartbeat",
+            "source_type",
+            "model_name",
+            "model_version",
+            "detector_backend",
+        ]
+        for field in preferred:
+            value = metadata.get(field, "")
+            if field.endswith("_time") or field == "last_heartbeat":
+                value = _local_datetime(float(value)) if value else ""
+            rows.append([field, value])
+        rows.extend([
+            ["zone", json.dumps(metadata.get("zone", []), separators=(",", ":"))],
+            ["settings", json.dumps(metadata.get("settings", {}), separators=(",", ":"))],
+        ])
+        for field in sorted(health):
+            rows.append([f"inference_{field}", health[field]])
+        return rows
+
+    def close(self) -> None:
+        self.store.close()
 
 
 def format_duration(seconds: float) -> str:

@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     ".venv-mac/**",
     "models/**",
     "next-env.d.ts",
+    "public/litert/**",
     "public/wasm/**",
   ]),
 ]);

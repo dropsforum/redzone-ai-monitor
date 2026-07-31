@@ -20,6 +20,12 @@ def parse_args():
     parser.add_argument("input_video", nargs="?", help="Optional video file, including when opening a file with the app.")
     parser.add_argument("--model", type=str, help="Ultralytics model name/path. Defaults to yolo26n.pt.")
     parser.add_argument("--device", type=str, choices=["auto", "mps", "cpu"], help="Inference device.")
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["pytorch", "coreml"],
+        help="Detector backend. PyTorch/MPS remains the production default.",
+    )
     parser.add_argument("--confidence", type=float, help="Detection confidence threshold, 0.0 to 1.0.")
     parser.add_argument("--imgsz", type=int, help="YOLO input image size. Defaults to 640.")
     parser.add_argument("--legacy-opencv", action="store_true", help="Launch the old OpenCV keyboard-control UI.")
@@ -36,6 +42,11 @@ def main():
             return run_qt_app(
                 initial_video=args.video or args.input_video,
                 camera_index=args.camera,
+                model_name=args.model,
+                model_device=args.device,
+                detector_backend=args.backend,
+                confidence_threshold=args.confidence,
+                model_imgsz=args.imgsz,
             )
 
         from ai_motion_app.main_app import MotionDetectionApp

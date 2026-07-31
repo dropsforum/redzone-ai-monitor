@@ -1,0 +1,67 @@
+{
+  "frame": {
+    "width": 1000,
+    "height": 1000
+  },
+  "zone": [
+    { "x": 0.4, "y": 0.4 },
+    { "x": 0.6, "y": 0.4 },
+    { "x": 0.6, "y": 0.8 },
+    { "x": 0.4, "y": 0.8 }
+  ],
+  "config": {
+    "entryConfirmMs": 300,
+    "exitGraceMs": 750,
+    "trackerMaxGapMs": 750,
+    "warningBuffer": 0.1
+  },
+  "sequences": [
+    {
+      "name": "brief gap, confirmed breach, and exact grace expiry",
+      "steps": [
+        {
+          "atMs": 0,
+          "detections": [
+            { "trackId": 1, "box": [450, 300, 550, 700], "confidence": 0.8 }
+          ],
+          "expectedState": "yellow"
+        },
+        {
+          "atMs": 100,
+          "detections": [],
+          "expectedState": "yellow"
+        },
+        {
+          "atMs": 300,
+          "detections": [
+            { "trackId": 1, "box": [455, 305, 555, 705], "confidence": 0.85 }
+          ],
+          "expectedState": "red"
+        },
+        {
+          "atMs": 700,
+          "detections": [],
+          "expectedState": "red"
+        },
+        {
+          "atMs": 1060,
+          "detections": [],
+          "expectedState": "green"
+        }
+      ],
+      "expectedPersonEvents": [
+        {
+          "trackId": 1,
+          "startMs": 0,
+          "endMs": 1050,
+          "maxConfidence": 0.85
+        }
+      ],
+      "expectedSegments": [
+        { "state": "clear", "startMs": 0, "endMs": 300 },
+        { "state": "breach", "startMs": 300, "endMs": 1050 },
+        { "state": "clear", "startMs": 1050, "endMs": 1060 }
+      ]
+    }
+  ]
+}

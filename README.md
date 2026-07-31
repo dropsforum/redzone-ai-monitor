@@ -66,6 +66,15 @@ python run_ai_app.py --video "/path/to/video.mp4"
 
 Recorded videos stay paused until you press `S` to start monitoring, then they play at normal video speed and loop. YOLO inference runs asynchronously so playback is not tied to AI throughput.
 
+The production Mac backend is PyTorch/MPS. To benchmark the experimental
+CoreML FP16 export without changing the default:
+
+```bash
+python run_ai_app.py \
+  --backend coreml \
+  --model ~/Library/Caches/redzone-ai-monitor/yolo26n-exports/yolo26n.mlpackage
+```
+
 ### Build the signed Mac app
 
 ```bash
@@ -117,25 +126,31 @@ It should not be used as the only control for hazardous work. Any operational us
 - Model file: `public/models/yolo26n.onnx`
 - Source model: `yolo26n.pt` from Ultralytics assets, downloaded/exported locally by each user
 - Model binaries: intentionally excluded from this public repository
-- Export toolchain: `ultralytics==8.4.68`, `onnx==1.20.0`, Python 3.12
-- Export command: `YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)`
+- Export toolchain: `ultralytics==8.4.112`, `onnx`, Python 3.11+
+- Export command: `python scripts/export_yolo26n.py --format onnx --weights yolo26n.pt --output-dir public/models --force`
 - Expected input shape: `(1, 3, 640, 640)`
 - Expected output shape: `(1, 300, 6)`
 - Browser runtime: `onnxruntime-web@1.26.0`; files in `public/wasm` are copied from `node_modules/onnxruntime-web/dist`.
 
+The YOLO26 end-to-end output already contains final `xyxy`, confidence, and
+class values, so the browser path must not apply a second NMS pass. LiteRT and
+CoreML FP16 are experimental benchmark candidates. ONNX/WASM and PyTorch/MPS
+remain the production defaults until a representative-footage benchmark meets
+the documented promotion thresholds.
+
 Generate the browser model locally before running detection:
 
 ```bash
-python -m pip install ultralytics onnx
-python - <<'PY'
-from pathlib import Path
-from ultralytics import YOLO
-
-exported = YOLO("yolo26n.pt").export(format="onnx", imgsz=640, opset=17, simplify=False)
-Path("public/models").mkdir(parents=True, exist_ok=True)
-Path(exported).replace("public/models/yolo26n.onnx")
-PY
+python -m pip install ultralytics==8.4.112 onnx
+python scripts/export_yolo26n.py --format onnx --weights yolo26n.pt --output-dir public/models --force
 ```
+
+Export the experimental formats and create SHA-256 provenance or benchmark
+templates with the scripts documented in
+[`docs/yolo26-model-ops.md`](./docs/yolo26-model-ops.md). Their default output
+locations are outside the repository. The existing `.gitignore` excludes the
+generated browser and Mac model artifacts; do not place provenance, benchmark
+outputs, or private footage in tracked repository paths.
 
 Ultralytics models and tooling have their own license terms. Users are responsible for confirming that their intended use, especially production or commercial deployment, complies with those terms.
 

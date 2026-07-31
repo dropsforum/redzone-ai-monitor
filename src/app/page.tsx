@@ -2,30 +2,88 @@
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor, Video, UploadCloud, BarChart3, Download } from 'lucide-react';
+import { Play, Square, Edit3, RefreshCcw, Camera, Settings, Zap, Cpu, Volume2, VolumeX, Smartphone, Monitor, Video, UploadCloud, BarChart3, Download, Users } from 'lucide-react';
 import VideoFrameSource, { VideoFrameRect, VideoFrameSourceHandle, VideoSourceMode } from '../components/VideoFrameSource';
 import ZoneEditor, { Point } from '../components/ZoneEditor';
 import DetectionOverlay from '../components/DetectionOverlay';
 import TrafficLight, { TrafficLightState } from '../components/TrafficLight';
-import { YoloDetector, Detection } from '../lib/yolo-detector';
-import { isPersonInZone, isPersonNearZone } from '../lib/zone-checker';
+import {
+  YoloDetector,
+  type BrowserInferenceBackend,
+  type InferenceResult,
+} from '../lib/yolo-detector';
 import { AlertManager } from '../lib/alert-manager';
 import {
   BreachAggregateMode,
   BreachRecorder,
   BreachSnapshot,
-  breachMetricsToCsv,
-  breachSegmentsToCsv,
   formatBucketLabel,
   formatDuration,
+  summarizeBreachSegments,
 } from '../lib/breach-recorder';
+import {
+  BrowserSessionStore,
+  createMonitoringSession,
+  type InferenceHealth,
+  type MonitoringSessionArchive,
+} from '../lib/session-store';
+import {
+  ZoneMonitor,
+  type PersonBreachEvent,
+  type TrackedDetection,
+} from '../lib/zone-monitor';
 
-type BreachReportTab = 'records' | 'metrics';
+type BreachReportTab = 'records' | 'people' | 'metrics';
+
+interface MutableInferenceHealth {
+  samples: number;
+  preprocessTotalMs: number;
+  inferenceTotalMs: number;
+  postprocessTotalMs: number;
+  maxInferenceMs: number;
+  droppedInferenceRequests: number;
+  detectorErrors: number;
+}
+
+function emptyMutableHealth(): MutableInferenceHealth {
+  return {
+    samples: 0,
+    preprocessTotalMs: 0,
+    inferenceTotalMs: 0,
+    postprocessTotalMs: 0,
+    maxInferenceMs: 0,
+    droppedInferenceRequests: 0,
+    detectorErrors: 0,
+  };
+}
+
+function summarizeHealth(health: MutableInferenceHealth, observedFps: number): InferenceHealth {
+  const divisor = Math.max(1, health.samples);
+  return {
+    observedFps,
+    inferenceSamples: health.samples,
+    averagePreprocessMs: health.preprocessTotalMs / divisor,
+    averageInferenceMs: health.inferenceTotalMs / divisor,
+    averagePostprocessMs: health.postprocessTotalMs / divisor,
+    maxInferenceMs: health.maxInferenceMs,
+    droppedInferenceRequests: health.droppedInferenceRequests,
+    detectorErrors: health.detectorErrors,
+  };
+}
+
+function hasVideoSource(
+  sourceMode: VideoSourceMode,
+  videoUrl: string | null,
+  dimensions: { width: number; height: number },
+) {
+  return Boolean(dimensions.width && dimensions.height && (sourceMode === 'camera' || videoUrl));
+}
 
 function HomeContent() {
   // App State
   const searchParams = useSearchParams();
   const isEmbedMode = searchParams.get('embed') === 'true';
+  const requestedBackend = searchParams.get('backend') === 'litert' ? 'litert' : 'onnx';
   
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -36,13 +94,20 @@ function HomeContent() {
     typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
   ));
   const [fps, setFps] = useState(0);
+  const [inferenceLatencyMs, setInferenceLatencyMs] = useState(0);
+  const [activeBackend, setActiveBackend] = useState('onnx-wasm');
   const [sourceMode, setSourceMode] = useState<VideoSourceMode>('camera');
   
   // Data State
-  const [detections, setDetections] = useState<Detection[]>([]);
+  const [detections, setDetections] = useState<TrackedDetection[]>([]);
   const [zone, setZone] = useState<Point[]>([]);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [trafficLightState, setTrafficLightState] = useState<TrafficLightState>('green');
+  const [personEvents, setPersonEvents] = useState<PersonBreachEvent[]>([]);
+  const [savedSessions, setSavedSessions] = useState<MonitoringSessionArchive[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState('');
+  const [currentSessionArchive, setCurrentSessionArchive] = useState<MonitoringSessionArchive | null>(null);
+  const [liveHealth, setLiveHealth] = useState<InferenceHealth>(() => summarizeHealth(emptyMutableHealth(), 0));
   
   // Camera State
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
@@ -57,9 +122,17 @@ function HomeContent() {
   const [breachReportTab, setBreachReportTab] = useState<BreachReportTab>('records');
 
   // Refs
-  const detectorRef = useRef<YoloDetector | null>(null);
+  const detectorRef = useRef<BrowserInferenceBackend | null>(null);
   const alertManagerRef = useRef<AlertManager>(new AlertManager(5));
   const breachRecorderRef = useRef<BreachRecorder>(new BreachRecorder());
+  const zoneMonitorRef = useRef<ZoneMonitor>(new ZoneMonitor());
+  const sessionStoreRef = useRef<BrowserSessionStore | null>(null);
+  const currentArchiveRef = useRef<MonitoringSessionArchive | null>(null);
+  const personEventHistoryRef = useRef<PersonBreachEvent[]>([]);
+  const personEventsRef = useRef<PersonBreachEvent[]>([]);
+  const healthRef = useRef<MutableInferenceHealth>(emptyMutableHealth());
+  const fpsRef = useRef(0);
+  const monitoringGenerationRef = useRef(0);
   const videoSourceRef = useRef<VideoFrameSourceHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoObjectUrlRef = useRef<string | null>(null);
@@ -72,19 +145,90 @@ function HomeContent() {
     setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
   }, [breachAggregateMode]);
 
+  const replacePersonEvents = useCallback((events: PersonBreachEvent[]) => {
+    personEventsRef.current = events;
+    setPersonEvents(events);
+  }, []);
+
+  const persistCurrentSession = useCallback(async (
+    nowMs = Date.now(),
+    status?: 'completed' | 'interrupted',
+  ) => {
+    const archive = currentArchiveRef.current;
+    const store = sessionStoreRef.current;
+    if (!archive || !store) return;
+
+    archive.session.lastHeartbeatMs = nowMs;
+    if (status) {
+      archive.session.status = status;
+      archive.session.endedAtMs = nowMs;
+    }
+    archive.segments = breachRecorderRef.current.snapshot(breachAggregateMode, nowMs).segments;
+    archive.personEvents = personEventsRef.current.map(event => ({ ...event }));
+    archive.health = summarizeHealth(healthRef.current, fpsRef.current);
+    await store.save(archive);
+    if (currentArchiveRef.current?.session.id === archive.session.id) {
+      setCurrentSessionArchive(structuredClone(archive));
+    }
+    setSavedSessions(await store.list());
+  }, [breachAggregateMode]);
+
+  const closeActiveTracks = useCallback((nowMs: number, resetTrackIds: boolean) => {
+    const stopped = zoneMonitorRef.current.stop(nowMs);
+    const merged = [
+      ...personEventHistoryRef.current,
+      ...stopped.personEvents,
+    ];
+    personEventHistoryRef.current = merged;
+    replacePersonEvents(merged);
+    zoneMonitorRef.current.reset(resetTrackIds);
+  }, [replacePersonEvents]);
+
+  const completeMonitoringSession = useCallback(async (nowMs = Date.now()) => {
+    monitoringGenerationRef.current += 1;
+    if (currentArchiveRef.current?.session.status !== 'active') return;
+    closeActiveTracks(nowMs, true);
+    breachRecorderRef.current.stop(nowMs);
+    setTrafficLightState('green');
+    setDetections([]);
+    refreshBreachSnapshot();
+    await persistCurrentSession(nowMs, 'completed');
+  }, [closeActiveTracks, persistCurrentSession, refreshBreachSnapshot]);
+
   const resetRuntimeState = useCallback(() => {
+    if (currentArchiveRef.current?.session.status === 'active') {
+      void completeMonitoringSession(Date.now());
+    }
     setIsMonitoring(false);
     setDetections([]);
     setTrafficLightState('green');
     setDimensions({ width: 0, height: 0 });
     setFrameRect({ left: 0, top: 0, width: 0, height: 0 });
     setFps(0);
+    setInferenceLatencyMs(0);
     frameCountRef.current = 0;
+    fpsRef.current = 0;
     lastProcessedTimeRef.current = 0;
     lastFpsUpdateRef.current = 0;
     breachRecorderRef.current.reset();
+    zoneMonitorRef.current.reset();
+    personEventHistoryRef.current = [];
+    replacePersonEvents([]);
+    healthRef.current = emptyMutableHealth();
+    currentArchiveRef.current = null;
+    setCurrentSessionArchive(null);
+    setLiveHealth(summarizeHealth(emptyMutableHealth(), 0));
+    setSelectedSessionId('');
     setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
-  }, [breachAggregateMode]);
+  }, [breachAggregateMode, completeMonitoringSession, replacePersonEvents]);
+
+  useEffect(() => {
+    const store = new BrowserSessionStore();
+    sessionStoreRef.current = store;
+    void store.recoverInterruptedSessions().then(() => store.list()).then(setSavedSessions).catch(error => {
+      console.error('[SESSION] Failed to load monitoring history:', error);
+    });
+  }, []);
 
   useEffect(() => {
     refreshBreachSnapshot();
@@ -95,6 +239,16 @@ function HomeContent() {
     const timer = window.setInterval(refreshBreachSnapshot, 1000);
     return () => window.clearInterval(timer);
   }, [isMonitoring, refreshBreachSnapshot]);
+
+  useEffect(() => {
+    if (!isMonitoring) return;
+    const timer = window.setInterval(() => {
+      void persistCurrentSession(Date.now()).catch(error => {
+        console.error('[SESSION] Heartbeat failed:', error);
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [isMonitoring, persistCurrentSession]);
 
   const clearRecordedVideo = useCallback(() => {
     if (videoObjectUrlRef.current) {
@@ -132,22 +286,49 @@ function HomeContent() {
     loadRecordedVideo(file);
   }, [loadRecordedVideo]);
 
-  const exportBreachCsv = useCallback(() => {
-    const csv = breachReportTab === 'records'
-      ? breachSegmentsToCsv(breachSnapshot.segments)
-      : breachMetricsToCsv(breachSnapshot, breachAggregateMode);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const selectedArchive = selectedSessionId
+    ? savedSessions.find(archive => archive.session.id === selectedSessionId) ?? null
+    : null;
+  const displayedBreachSnapshot = selectedArchive
+    ? summarizeBreachSegments(selectedArchive.segments, breachAggregateMode)
+    : breachSnapshot;
+  const displayedPersonEvents = selectedArchive?.personEvents ?? personEvents;
+  const displayedHealth = selectedArchive?.health
+    ?? liveHealth;
+
+  const exportSessionWorkbook = useCallback(async () => {
+    let archive = selectedSessionId
+      ? savedSessions.find(saved => saved.session.id === selectedSessionId) ?? null
+      : null;
+    if (!archive && currentArchiveRef.current) {
+      const nowMs = Date.now();
+      const current = currentArchiveRef.current;
+      current.segments = breachRecorderRef.current.snapshot(breachAggregateMode, nowMs).segments;
+      current.personEvents = personEventsRef.current.map(event => ({ ...event }));
+      current.health = summarizeHealth(healthRef.current, fpsRef.current);
+      archive = structuredClone(current);
+    }
+    if (!archive) return;
+
+    const { buildSessionWorkbook } = await import('../lib/report-workbook');
+    const workbook = await buildSessionWorkbook(archive, breachAggregateMode);
+    const workbookBuffer = new ArrayBuffer(workbook.byteLength);
+    new Uint8Array(workbookBuffer).set(workbook);
+    const blob = new Blob([workbookBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `drops-breach-${breachReportTab}-${Date.now()}.csv`;
+    link.download = `drops-red-zone-session-${archive.session.id}.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
-  }, [breachAggregateMode, breachReportTab, breachSnapshot]);
+  }, [breachAggregateMode, savedSessions, selectedSessionId]);
 
   useEffect(() => {
     return () => {
       if (videoObjectUrlRef.current) URL.revokeObjectURL(videoObjectUrlRef.current);
+      detectorRef.current?.dispose();
     };
   }, []);
 
@@ -190,7 +371,7 @@ function HomeContent() {
       
       // Label background
       ctx.fillStyle = '#55799a';
-      const label = `PERSON ${Math.round(det.confidence * 100)}%`;
+      const label = `PERSON #${det.trackId} ${Math.round(det.confidence * 100)}%`;
       ctx.font = 'bold 12px sans-serif';
       const textWidth = ctx.measureText(label).width;
       ctx.fillRect(det.x1, det.y1 - 20, textWidth + 10, 20);
@@ -269,20 +450,125 @@ function HomeContent() {
 
   // Initialize Detector
   useEffect(() => {
+    let cancelled = false;
+    let initializedDetector: BrowserInferenceBackend | null = null;
     const init = async () => {
       try {
-        const detector = new YoloDetector();
-        await detector.init('/models/yolo26n.onnx');
+        const detector: BrowserInferenceBackend = requestedBackend === 'litert'
+          ? new (await import('../lib/litert-detector')).LiteRtDetector()
+          : new YoloDetector();
+        initializedDetector = detector;
+        const modelPath = requestedBackend === 'litert'
+          ? '/models/yolo26n.tflite'
+          : '/models/yolo26n.onnx';
+        await detector.init(modelPath);
+        if (cancelled) {
+          detector.dispose();
+          return;
+        }
         detectorRef.current = detector;
+        setActiveBackend(detector.backend);
         setIsModelLoaded(true);
         setModelError(null);
       } catch (error) {
         console.error('[APP] Failed to initialize detector:', error);
-        setModelError('Generate public/models/yolo26n.onnx before monitoring.');
+        const message = error instanceof Error ? error.message : String(error);
+        setModelError(
+          /404|fetch|not found/i.test(message)
+            ? `Generate public/models/yolo26n.${requestedBackend === 'litert' ? 'tflite' : 'onnx'} before monitoring.`
+            : `The YOLO26 model could not be initialized: ${message}`,
+        );
       }
     };
     void init();
-  }, []);
+    return () => {
+      cancelled = true;
+      if (detectorRef.current === initializedDetector) detectorRef.current = null;
+      initializedDetector?.dispose();
+    };
+  }, [requestedBackend]);
+
+  const startMonitoring = useCallback(async () => {
+    if (!isModelLoaded || zone.length < 3 || !hasVideoSource(sourceMode, videoUrl, dimensions)) return;
+    monitoringGenerationRef.current += 1;
+    await alertManagerRef.current.unlockAudio();
+    setIsDrawing(false);
+    setSelectedSessionId('');
+    zoneMonitorRef.current.reset();
+    zoneMonitorRef.current.setWarningBuffer(warningBuffer);
+    personEventHistoryRef.current = [];
+    replacePersonEvents([]);
+    healthRef.current = emptyMutableHealth();
+    breachRecorderRef.current.reset();
+
+    const nowMs = Date.now();
+    breachRecorderRef.current.start(nowMs);
+    const sourceLabel = sourceMode === 'file'
+      ? videoFileName ?? 'Recorded video'
+      : availableDevices.find(device => device.deviceId === selectedDeviceId)?.label || 'Camera';
+    currentArchiveRef.current = {
+      session: createMonitoringSession({
+        startedAtMs: nowMs,
+        sourceMode,
+        sourceLabel,
+        zone,
+        modelName: 'yolo26n',
+        modelVersion: '8.4.112',
+        backend: detectorRef.current?.backend ?? activeBackend,
+        warningBuffer,
+      }),
+      segments: [],
+      personEvents: [],
+      health: summarizeHealth(healthRef.current, 0),
+    };
+    setCurrentSessionArchive(structuredClone(currentArchiveRef.current));
+    setLiveHealth(summarizeHealth(healthRef.current, 0));
+    setIsMonitoring(true);
+    if (sourceMode === 'file') {
+      await videoSourceRef.current?.play().catch(error => {
+        console.error('[APP] Recorded video playback failed:', error);
+      });
+    }
+    await persistCurrentSession(nowMs).catch(error => {
+      console.error('[SESSION] Initial save failed:', error);
+    });
+  }, [
+    activeBackend,
+    availableDevices,
+    dimensions,
+    isModelLoaded,
+    persistCurrentSession,
+    replacePersonEvents,
+    selectedDeviceId,
+    sourceMode,
+    videoFileName,
+    videoUrl,
+    warningBuffer,
+    zone,
+  ]);
+
+  const stopMonitoring = useCallback(async () => {
+    const nowMs = Date.now();
+    setIsMonitoring(false);
+    if (sourceMode === 'file') videoSourceRef.current?.pause();
+    await completeMonitoringSession(nowMs).catch(error => {
+      console.error('[SESSION] Final save failed:', error);
+    });
+  }, [completeMonitoringSession, sourceMode]);
+
+  const handleTimelineReset = useCallback(() => {
+    if (!isMonitoring) return;
+    monitoringGenerationRef.current += 1;
+    const nowMs = Date.now();
+    closeActiveTracks(nowMs, false);
+    breachRecorderRef.current.update(false, nowMs);
+    setTrafficLightState('green');
+    setDetections([]);
+    refreshBreachSnapshot();
+    void persistCurrentSession(nowMs).catch(error => {
+      console.error('[SESSION] Timeline reset save failed:', error);
+    });
+  }, [closeActiveTracks, isMonitoring, persistCurrentSession, refreshBreachSnapshot]);
 
   // Update dimensions when video loads
   const handleFrame = useCallback((canvas: HTMLCanvasElement) => {
@@ -301,45 +587,92 @@ function HomeContent() {
     
     if (now - lastProcessedTimeRef.current >= throttle) {
       lastProcessedTimeRef.current = now;
+      const monitoringGeneration = monitoringGenerationRef.current;
       
-      detectorRef.current.detect(canvas).then(results => {
-        setDetections(results);
-        
-        let personInZone = false;
-
-        // Check for zone alerts
-        if (zone.length >= 3 && results.length > 0) {
-          personInZone = results.some(det => {
-            const inZone = isPersonInZone(det, zone, canvas.width, canvas.height, true);
-            return inZone;
-          });
-
-          if (personInZone) {
-            setTrafficLightState('red');
-            alertManagerRef.current.trigger(isAudioEnabled).catch(e => console.error('[APP] Alert trigger failed:', e));
-          } else {
-            // Yellow: person is near or partially in zone
-            const personNearZone = results.some(det => isPersonNearZone(det, zone, canvas.width, canvas.height, warningBuffer));
-            setTrafficLightState(personNearZone ? 'yellow' : 'green');
-          }
-        } else {
-          // Green: no zone or no detections
-          setTrafficLightState('green');
+      detectorRef.current.detect(canvas).then((result: InferenceResult) => {
+        if (
+          monitoringGeneration !== monitoringGenerationRef.current
+          || currentArchiveRef.current?.session.status !== 'active'
+        ) {
+          return;
+        }
+        if (result.dropped) {
+          healthRef.current.droppedInferenceRequests += 1;
+          return;
         }
 
-        breachRecorderRef.current.update(personInZone, Date.now());
+        const resultTime = Date.now();
+        healthRef.current.samples += 1;
+        healthRef.current.preprocessTotalMs += result.timings.preprocessMs;
+        healthRef.current.inferenceTotalMs += result.timings.inferenceMs;
+        healthRef.current.postprocessTotalMs += result.timings.postprocessMs;
+        healthRef.current.maxInferenceMs = Math.max(
+          healthRef.current.maxInferenceMs,
+          result.timings.inferenceMs,
+        );
+        setLiveHealth(summarizeHealth(healthRef.current, fpsRef.current));
+        setInferenceLatencyMs(result.timings.totalMs);
+        setActiveBackend(result.backend);
+
+        zoneMonitorRef.current.setWarningBuffer(warningBuffer);
+        const zoneSnapshot = zoneMonitorRef.current.update(
+          result.detections,
+          zone,
+          canvas.width,
+          canvas.height,
+          resultTime,
+        );
+        setDetections(zoneSnapshot.tracks);
+        setTrafficLightState(zoneSnapshot.state);
+        replacePersonEvents([
+          ...personEventHistoryRef.current,
+          ...zoneSnapshot.personEvents,
+        ]);
+
+        if (zoneSnapshot.enteredRed) {
+          alertManagerRef.current.trigger(isAudioEnabled).catch(error => {
+            console.error('[APP] Alert trigger failed:', error);
+          });
+        }
+
+        breachRecorderRef.current.update(
+          zoneSnapshot.state === 'red',
+          zoneSnapshot.stateChangedAtMs ?? resultTime,
+        );
         refreshBreachSnapshot();
+        if (zoneSnapshot.stateChangedAtMs !== null) {
+          void persistCurrentSession(resultTime).catch(error => {
+            console.error('[SESSION] State transition save failed:', error);
+          });
+        }
 
         // FPS Calculation
         frameCountRef.current++;
-        if (now - lastFpsUpdateRef.current >= 1000) {
+        if (resultTime - lastFpsUpdateRef.current >= 1000) {
           setFps(frameCountRef.current);
+          fpsRef.current = frameCountRef.current;
+          setLiveHealth(summarizeHealth(healthRef.current, fpsRef.current));
           frameCountRef.current = 0;
-          lastFpsUpdateRef.current = now;
+          lastFpsUpdateRef.current = resultTime;
         }
+      }).catch(error => {
+        if (monitoringGeneration !== monitoringGenerationRef.current) return;
+        healthRef.current.detectorErrors += 1;
+        console.error('[APP] Detection failed:', error);
       });
     }
-  }, [isMonitoring, isModelLoaded, zone, isAudioEnabled, isMobileMode, dimensions, warningBuffer, refreshBreachSnapshot]);
+  }, [
+    dimensions,
+    isAudioEnabled,
+    isMobileMode,
+    isModelLoaded,
+    isMonitoring,
+    persistCurrentSession,
+    refreshBreachSnapshot,
+    replacePersonEvents,
+    warningBuffer,
+    zone,
+  ]);
 
   const overlayStyle: React.CSSProperties = {
     left: frameRect.left,
@@ -347,7 +680,7 @@ function HomeContent() {
     width: frameRect.width || '100%',
     height: frameRect.height || '100%',
   };
-  const hasActiveVideoSource = Boolean(dimensions.width && dimensions.height && (sourceMode === 'camera' || videoUrl));
+  const hasActiveVideoSource = hasVideoSource(sourceMode, videoUrl, dimensions);
 
   return (
     <main className={`bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans mx-auto ${isEmbedMode ? 'max-w-none w-full' : 'max-w-[700px]'}`}>
@@ -436,6 +769,7 @@ function HomeContent() {
               videoLabel={videoFileName}
               frameIntervalMs={isMobileMode ? 333 : 100}
               onVideoFileDrop={loadRecordedVideo}
+              onTimelineReset={handleTimelineReset}
             />
 
             {hasActiveVideoSource && (
@@ -478,6 +812,12 @@ function HomeContent() {
                 {isMobileMode ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
                 <span className="text-[10px] font-mono font-bold">{fps} FPS</span>
               </div>
+              <div className="flex items-center gap-2 text-slate-400">
+                <Cpu className="w-3 h-3" />
+                <span className="text-[10px] font-mono font-bold">
+                  {activeBackend} · {Math.round(inferenceLatencyMs)} ms
+                </span>
+              </div>
               <button 
                 onClick={() => setIsAudioEnabled(!isAudioEnabled)}
                 className={`transition-colors ${isAudioEnabled ? 'text-[#55799a]' : 'text-slate-300'}`}
@@ -490,30 +830,8 @@ function HomeContent() {
           {/* Controls Footer */}
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={async () => {
-                await alertManagerRef.current.unlockAudio();
-                const nextMonitoring = !isMonitoring;
-
-                if (nextMonitoring) {
-                  setIsDrawing(false);
-                }
-
-                if (sourceMode === 'file') {
-                  if (nextMonitoring) {
-                    await videoSourceRef.current?.play().catch(e => console.error('[APP] Recorded video playback failed:', e));
-                  } else {
-                    videoSourceRef.current?.pause();
-                  }
-                }
-
-                setIsMonitoring(nextMonitoring);
-                if (nextMonitoring) {
-                  breachRecorderRef.current.start(Date.now());
-                } else {
-                  breachRecorderRef.current.stop(Date.now());
-                  setTrafficLightState('green');
-                }
-                refreshBreachSnapshot();
+              onClick={() => {
+                void (isMonitoring ? stopMonitoring() : startMonitoring());
               }}
               disabled={!isModelLoaded || zone.length < 3 || !hasActiveVideoSource}
               className={`flex-1 min-w-[140px] h-12 flex items-center justify-center gap-2 rounded-xl font-bold transition-all ${
@@ -530,8 +848,7 @@ function HomeContent() {
               onClick={() => {
                 setIsDrawing(!isDrawing);
                 if (!isDrawing) {
-                  setIsMonitoring(false);
-                  if (sourceMode === 'file') videoSourceRef.current?.pause();
+                  if (isMonitoring) void stopMonitoring();
                 }
               }}
               disabled={!hasActiveVideoSource}
@@ -580,12 +897,39 @@ function HomeContent() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <select
+                value={selectedSessionId}
+                onChange={(event) => setSelectedSessionId(event.target.value)}
+                className="h-8 max-w-[210px] rounded-lg border border-slate-100 bg-slate-50 px-2 text-[9px] font-mono text-slate-500 outline-none"
+                title="Monitoring session"
+              >
+                <option value="">Current session</option>
+                {savedSessions.map(archive => (
+                  <option key={archive.session.id} value={archive.session.id}>
+                    {new Date(archive.session.startedAtMs).toLocaleString()} · {archive.session.sourceLabel}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => {
-                  breachRecorderRef.current.reset();
-                  if (isMonitoring) breachRecorderRef.current.start(Date.now());
-                  setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
+                  void (async () => {
+                    if (isMonitoring) {
+                      await completeMonitoringSession(Date.now());
+                      currentArchiveRef.current = null;
+                      setCurrentSessionArchive(null);
+                      await startMonitoring();
+                      return;
+                    }
+                    breachRecorderRef.current.reset();
+                    zoneMonitorRef.current.reset();
+                    personEventHistoryRef.current = [];
+                    replacePersonEvents([]);
+                    currentArchiveRef.current = null;
+                    setCurrentSessionArchive(null);
+                    setSelectedSessionId('');
+                    setBreachSnapshot(breachRecorderRef.current.snapshot(breachAggregateMode));
+                  })();
                 }}
                 className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-100 text-[#55799a] hover:bg-slate-50"
                 title="Reset breach recording"
@@ -594,10 +938,10 @@ function HomeContent() {
               </button>
               <button
                 type="button"
-                onClick={exportBreachCsv}
-                disabled={breachSnapshot.segments.length === 0}
+                onClick={() => void exportSessionWorkbook()}
+                disabled={!selectedArchive && !currentSessionArchive}
                 className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-100 text-[#55799a] hover:bg-slate-50 disabled:opacity-40"
-                title={`Export ${breachReportTab} CSV`}
+                title="Export session Excel workbook"
               >
                 <Download className="w-3.5 h-3.5" />
               </button>
@@ -605,7 +949,7 @@ function HomeContent() {
           </div>
 
           <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm">
-            {(['records', 'metrics'] as BreachReportTab[]).map((tab) => (
+            {(['records', 'people', 'metrics'] as BreachReportTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -624,11 +968,11 @@ function HomeContent() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-red-50 border border-red-100 p-3">
                   <div className="text-[8px] uppercase tracking-widest font-black text-red-300">Breach Records</div>
-                  <div className="text-lg font-black text-red-500">{breachSnapshot.breachCount}</div>
+                  <div className="text-lg font-black text-red-500">{displayedBreachSnapshot.breachCount}</div>
                 </div>
                 <div className="rounded-xl bg-green-50 border border-green-100 p-3">
                   <div className="text-[8px] uppercase tracking-widest font-black text-green-400">No-Breach Records</div>
-                  <div className="text-lg font-black text-green-600">{breachSnapshot.clearCount}</div>
+                  <div className="text-lg font-black text-green-600">{displayedBreachSnapshot.clearCount}</div>
                 </div>
               </div>
 
@@ -643,14 +987,14 @@ function HomeContent() {
                     </tr>
                   </thead>
                   <tbody className="font-mono text-slate-500">
-                    {breachSnapshot.segments.length === 0 ? (
+                    {displayedBreachSnapshot.segments.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="px-3 py-8 text-center uppercase tracking-widest text-slate-300 font-black">
                           Start monitoring to record breach and no-breach periods
                         </td>
                       </tr>
                     ) : (
-                      breachSnapshot.segments.slice(-20).map((segment, index) => (
+                      displayedBreachSnapshot.segments.slice(-20).map((segment, index) => (
                         <tr key={`${segment.startMs}-${index}`} className="border-t border-slate-100">
                           <td className={`px-3 py-2 font-black ${segment.state === 'breach' ? 'text-red-500' : 'text-green-600'}`}>
                             {segment.state === 'breach' ? 'BREACH' : 'NO BREACH'}
@@ -658,6 +1002,64 @@ function HomeContent() {
                           <td className="px-3 py-2">{new Date(segment.startMs).toLocaleString()}</td>
                           <td className="px-3 py-2">{new Date(segment.endMs).toLocaleString()}</td>
                           <td className="px-3 py-2 text-right">{formatDuration(segment.endMs - segment.startMs)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : breachReportTab === 'people' ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl border border-red-100 bg-red-50 p-3">
+                  <div className="text-[8px] font-black uppercase tracking-widest text-red-300">Person Breaches</div>
+                  <div className="text-lg font-black text-red-500">{displayedPersonEvents.length}</div>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-[8px] font-black uppercase tracking-widest text-slate-400">Tracked People</div>
+                  <div className="text-lg font-black text-[#55799a]">
+                    {new Set(displayedPersonEvents.map(event => event.trackId)).size}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="text-[8px] font-black uppercase tracking-widest text-slate-400">Combined Time</div>
+                  <div className="text-lg font-black text-slate-700">
+                    {formatDuration(displayedPersonEvents.reduce((sum, event) => sum + event.endMs - event.startMs, 0))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="max-h-64 overflow-auto rounded-xl border border-slate-100">
+                <table className="w-full text-left text-[9px]">
+                  <thead className="sticky top-0 bg-slate-50 uppercase tracking-widest text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2">Person</th>
+                      <th className="px-3 py-2">Start</th>
+                      <th className="px-3 py-2">End</th>
+                      <th className="px-3 py-2 text-right">Duration</th>
+                      <th className="px-3 py-2 text-right">Max confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-slate-500">
+                    {displayedPersonEvents.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-8 text-center font-black uppercase tracking-widest text-slate-300">
+                          No confirmed person breaches
+                        </td>
+                      </tr>
+                    ) : (
+                      displayedPersonEvents.slice(-100).map((event, index) => (
+                        <tr key={`${event.trackId}-${event.startMs}-${index}`} className="border-t border-slate-100">
+                          <td className="px-3 py-2 font-black text-[#55799a]">
+                            <span className="inline-flex items-center gap-1">
+                              <Users className="h-3 w-3" /> #{event.trackId}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">{new Date(event.startMs).toLocaleString()}</td>
+                          <td className="px-3 py-2">{new Date(event.endMs).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right">{formatDuration(event.endMs - event.startMs)}</td>
+                          <td className="px-3 py-2 text-right">{Math.round(event.maxConfidence * 100)}%</td>
                         </tr>
                       ))
                     )}
@@ -681,28 +1083,28 @@ function HomeContent() {
               <div className="grid grid-cols-3 gap-2">
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                   <div className="text-[8px] uppercase tracking-widest font-black text-slate-400">Breach</div>
-                  <div className="text-lg font-black text-red-500">{formatDuration(breachSnapshot.totalBreachMs)}</div>
+                  <div className="text-lg font-black text-red-500">{formatDuration(displayedBreachSnapshot.totalBreachMs)}</div>
                 </div>
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                   <div className="text-[8px] uppercase tracking-widest font-black text-slate-400">Rate</div>
                   <div className="text-lg font-black text-[#55799a]">
-                    {breachSnapshot.totalMs > 0 ? `${Math.round((breachSnapshot.totalBreachMs / breachSnapshot.totalMs) * 100)}%` : '0%'}
+                    {displayedBreachSnapshot.totalMs > 0 ? `${Math.round((displayedBreachSnapshot.totalBreachMs / displayedBreachSnapshot.totalMs) * 100)}%` : '0%'}
                   </div>
                 </div>
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                   <div className="text-[8px] uppercase tracking-widest font-black text-slate-400">Observed</div>
-                  <div className="text-lg font-black text-slate-700">{formatDuration(breachSnapshot.totalMs)}</div>
+                  <div className="text-lg font-black text-slate-700">{formatDuration(displayedBreachSnapshot.totalMs)}</div>
                 </div>
               </div>
 
               <div className="h-32 rounded-xl border border-slate-100 bg-slate-50 px-3 pt-3 pb-7">
-                {breachSnapshot.buckets.length === 0 ? (
+                {displayedBreachSnapshot.buckets.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-[10px] uppercase tracking-widest font-black text-slate-300">
                     Start monitoring to produce metrics
                   </div>
                 ) : (
                   <div className="h-full flex items-end gap-1">
-                    {breachSnapshot.buckets.slice(-18).map((bucket) => (
+                    {displayedBreachSnapshot.buckets.slice(-18).map((bucket) => (
                       <div key={bucket.startMs} className="relative flex-1 h-full flex items-end">
                         <div className="absolute inset-x-0 bottom-0 bg-slate-200/70 rounded-t-sm" style={{ height: `${Math.max(3, (bucket.totalMs / (breachAggregateMode === 'hour' ? 3_600_000 : 60_000)) * 100)}%` }} />
                         <div className="absolute inset-x-0 bottom-0 bg-red-500 rounded-t-sm" style={{ height: `${Math.max(bucket.breachMs > 0 ? 3 : 0, bucket.breachPercent)}%` }} />
@@ -737,14 +1139,14 @@ function HomeContent() {
                       </tr>
                     </thead>
                     <tbody className="font-mono text-slate-500">
-                      {breachSnapshot.buckets.length === 0 ? (
+                      {displayedBreachSnapshot.buckets.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="px-3 py-8 text-center uppercase tracking-widest text-slate-300 font-black">
                             No aggregated report yet
                           </td>
                         </tr>
                       ) : (
-                        breachSnapshot.buckets.slice(-60).map((bucket) => (
+                        displayedBreachSnapshot.buckets.slice(-60).map((bucket) => (
                           <tr key={bucket.startMs} className="border-t border-slate-100">
                             <td className="px-3 py-2">{new Date(bucket.startMs).toLocaleString()}</td>
                             <td className="px-3 py-2">{new Date(bucket.endMs).toLocaleString()}</td>
@@ -760,18 +1162,32 @@ function HomeContent() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                {[
+                  ['Preprocess', `${displayedHealth.averagePreprocessMs.toFixed(1)} ms`],
+                  ['Inference', `${displayedHealth.averageInferenceMs.toFixed(1)} ms`],
+                  ['Postprocess', `${displayedHealth.averagePostprocessMs.toFixed(1)} ms`],
+                  ['Dropped / errors', `${displayedHealth.droppedInferenceRequests} / ${displayedHealth.detectorErrors}`],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                    <div className="text-[7px] font-black uppercase tracking-widest text-slate-400">{label}</div>
+                    <div className="mt-1 text-[10px] font-mono font-bold text-slate-600">{value}</div>
+                  </div>
+                ))}
+              </div>
+
               <div className="grid grid-cols-2 gap-2 text-[9px] font-mono text-slate-400">
                 <span className="px-2 py-1 rounded-lg border border-slate-100 bg-slate-50">
-                  Period start: {breachSnapshot.periodStartMs ? new Date(breachSnapshot.periodStartMs).toLocaleString() : 'None'}
+                  Period start: {displayedBreachSnapshot.periodStartMs ? new Date(displayedBreachSnapshot.periodStartMs).toLocaleString() : 'None'}
                 </span>
                 <span className="px-2 py-1 rounded-lg border border-slate-100 bg-slate-50">
-                  Period end: {breachSnapshot.periodEndMs ? new Date(breachSnapshot.periodEndMs).toLocaleString() : 'None'}
+                  Period end: {displayedBreachSnapshot.periodEndMs ? new Date(displayedBreachSnapshot.periodEndMs).toLocaleString() : 'None'}
                 </span>
-                <span className={`px-2 py-1 rounded-lg border ${breachSnapshot.currentState === 'breach' ? 'bg-red-50 text-red-500 border-red-100' : 'bg-green-50 text-green-600 border-green-100'}`}>
-                  Current: {breachSnapshot.currentState === 'breach' ? `Breach ${formatDuration(breachSnapshot.activeBreachMs)}` : 'Clear'}
+                <span className={`px-2 py-1 rounded-lg border ${displayedBreachSnapshot.currentState === 'breach' ? 'bg-red-50 text-red-500 border-red-100' : 'bg-green-50 text-green-600 border-green-100'}`}>
+                  Current: {displayedBreachSnapshot.currentState === 'breach' ? `Breach ${formatDuration(displayedBreachSnapshot.activeBreachMs)}` : 'Clear'}
                 </span>
                 <span className="px-2 py-1 rounded-lg border border-slate-100 bg-slate-50">
-                  Clear: {formatDuration(breachSnapshot.totalClearMs)}
+                  Clear: {formatDuration(displayedBreachSnapshot.totalClearMs)}
                 </span>
               </div>
             </div>
@@ -796,7 +1212,14 @@ function HomeContent() {
               max="0.3" 
               step="0.01" 
               value={warningBuffer}
-              onChange={(e) => setWarningBuffer(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const nextBuffer = parseFloat(e.target.value);
+                setWarningBuffer(nextBuffer);
+                zoneMonitorRef.current.setWarningBuffer(nextBuffer);
+                if (currentArchiveRef.current?.session.status === 'active') {
+                  currentArchiveRef.current.session.warningBuffer = nextBuffer;
+                }
+              }}
               className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-[#55799a]"
             />
             <p className="text-[8px] text-slate-400 italic leading-tight">Controls how close a person must be to the red zone to trigger the yellow warning light.</p>
@@ -819,7 +1242,11 @@ function HomeContent() {
               </div>
               <select 
                 value={selectedDeviceId || ''} 
-                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                onChange={(e) => {
+                  if (isMonitoring) void stopMonitoring();
+                  zoneMonitorRef.current.reset();
+                  setSelectedDeviceId(e.target.value);
+                }}
                 className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-[10px] font-mono text-slate-600 outline-none focus:ring-1 focus:ring-[#55799a] transition-all cursor-pointer"
               >
                 {availableDevices.length === 0 ? (

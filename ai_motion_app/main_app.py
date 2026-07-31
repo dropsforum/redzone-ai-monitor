@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import List, Optional, Tuple
 
 from .camera_manager import CameraManager
-from .ai_detector import AIDetector
+from .ai_detector import AIDetector, TrackedDetection
 from .zone_manager import ZoneManager
 from .alert_system import AlertSystem
 from .config import Config
@@ -44,6 +44,7 @@ class MotionDetectionApp:
             confidence_threshold=self.config.get('confidence_threshold', 0.5),
             imgsz=int(self.config.get('model_imgsz', 640)),
             device=self.config.get('model_device', 'auto'),
+            backend=self.config.get('detector_backend', 'pytorch'),
         )
         
         self.zone = ZoneManager()
@@ -63,7 +64,7 @@ class MotionDetectionApp:
         self.alert_frames = 0  # consecutive frames that meet alert criteria
         self.last_detection_at = 0.0
         self.detection_interval = float(self.config.get('detection_interval_ms', 100)) / 1000.0
-        self.last_detections: List[Tuple[int, int, int, int, float]] = []
+        self.last_detections: List[TrackedDetection] = []
         self.detector_executor: Optional[ThreadPoolExecutor] = None
         self.detector_future: Optional[Future] = None
         self.detector_load_future: Optional[Future] = None
@@ -139,14 +140,14 @@ class MotionDetectionApp:
             executor = self.ensure_detector_executor()
             self.detector_future = executor.submit(self.detector.detect_people, frame.copy())
 
-    def evaluate_alert_state(self, frame: np.ndarray, detections: List[Tuple[int, int, int, int, float]]) -> bool:
+    def evaluate_alert_state(self, frame: np.ndarray, detections: List[TrackedDetection]) -> bool:
         """Update alert and traffic-light state from the newest completed detection result."""
         min_overlap = float(self.config.get('alert_min_overlap', 0.15))
         activation_frames = int(self.config.get('alert_activation_frames', 3))
 
         hit_this_result = False
         max_overlap = 0.0
-        for x1, y1, x2, y2, _conf in detections:
+        for x1, y1, x2, y2, _conf, _track_id in detections:
             overlap = self.zone.bbox_zone_overlap_ratio((x1, y1, x2, y2), frame.shape[:2])
             max_overlap = max(max_overlap, overlap)
             if overlap >= min_overlap:
@@ -170,15 +171,15 @@ class MotionDetectionApp:
         min_overlap = float(self.config.get('alert_min_overlap', 0.15))
         bbox_color = self.config.get('bbox_color', (255, 0, 0))
 
-        for x1, y1, x2, y2, conf in self.last_detections:
+        for x1, y1, x2, y2, conf, track_id in self.last_detections:
             overlap = self.zone.bbox_zone_overlap_ratio((x1, y1, x2, y2), frame.shape[:2])
             if overlap >= min_overlap:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                label = f"ALERT {conf:.2f} ovl {overlap:.2f}"
+                label = f"ALERT #{track_id} {conf:.2f} ovl {overlap:.2f}"
                 cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             else:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), bbox_color, 2)
-                label = f"Person {conf:.2f}"
+                label = f"Person #{track_id} {conf:.2f}"
                 cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         return frame
@@ -385,6 +386,7 @@ class MotionDetectionApp:
             
         elif key == ord('d') or key == ord('D'):
             if self.state != self.STATE_DRAWING:
+                self.detector.reset_tracker()
                 self.state = self.STATE_DRAWING
                 self.camera.pause_playback()
                 print("\n✏️  Entering zone drawing mode")
@@ -393,6 +395,7 @@ class MotionDetectionApp:
                 print("  • Press ESC to cancel")
             
         elif key == ord('c') or key == ord('C'):
+            self.detector.reset_tracker()
             self.zone.clear()
             if self.state == self.STATE_MONITORING:
                 self.state = self.STATE_SETUP
@@ -406,6 +409,7 @@ class MotionDetectionApp:
                     
         elif key == ord('s') or key == ord('S'):
             if self.zone.has_zone():
+                self.detector.reset_tracker()
                 self.state = self.STATE_MONITORING
                 self.camera.start_playback(restart=False)
                 self.ensure_detector_loading()
@@ -416,6 +420,7 @@ class MotionDetectionApp:
         elif key == ord('p') or key == ord('P'):
             if self.state == self.STATE_MONITORING:
                 self.state = self.STATE_PAUSED
+                self.detector.reset_tracker()
                 self.camera.pause_playback()
                 print("\n⏸️  Monitoring paused")
             elif self.state == self.STATE_PAUSED:
@@ -439,6 +444,7 @@ class MotionDetectionApp:
                     idx = 0
                 next_idx = cams[(idx + 1) % len(cams)]
                 if self.camera.switch_camera(next_idx):
+                    self.detector.reset_tracker()
                     # Persist selection
                     self.config.set('camera_index', next_idx)
                     self.config.save()
@@ -555,6 +561,7 @@ class MotionDetectionApp:
                 self.config.save()
             
             self.camera.stop()
+            self.detector.reset_tracker()
             if self.detector_executor is not None:
                 self.detector_executor.shutdown(wait=False, cancel_futures=True)
             cv2.destroyAllWindows()

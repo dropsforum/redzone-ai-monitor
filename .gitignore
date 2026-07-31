@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/.playwright-cli/
+/output/playwright/
 
 # next.js
 /.next/
@@ -24,9 +26,13 @@
 # native mac packaging
 /.venv-mac
 /public/models/*.onnx
+/public/models/*.tflite
+/public/litert/
 /models/*.pt
+/models/*.mlpackage
 /*.pt
 /*.onnx
+/*.tflite
 /*.dmg
 __pycache__/
 **/__pycache__/

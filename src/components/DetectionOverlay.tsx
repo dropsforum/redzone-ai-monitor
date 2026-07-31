@@ -1,10 +1,16 @@
 "use client";
 
 import React from 'react';
-import { Detection } from '../lib/yolo-detector';
+import type { Detection } from '../lib/yolo-detector';
+
+type DisplayDetection = Detection & {
+  trackId?: number;
+  pendingEntry?: boolean;
+  breachActive?: boolean;
+};
 
 interface DetectionOverlayProps {
-  detections: Detection[];
+  detections: DisplayDetection[];
   width: number;
   height: number;
 }
@@ -21,10 +27,21 @@ const DetectionOverlay: React.FC<DetectionOverlayProps> = ({ detections, width, 
         const boxWidth = ((det.x2 - det.x1) / width) * 100;
         const boxHeight = ((det.y2 - det.y1) / height) * 100;
 
+        const tone = det.breachActive
+          ? 'border-red-500 bg-red-500/10'
+          : det.pendingEntry
+            ? 'border-yellow-400 bg-yellow-400/10'
+            : 'border-[#55799a] bg-[#55799a]/10';
+        const labelTone = det.breachActive
+          ? 'bg-red-600'
+          : det.pendingEntry
+            ? 'bg-yellow-500'
+            : 'bg-[#55799a]';
+
         return (
           <div 
-            key={i}
-            className="absolute border-2 border-red-500 bg-red-500/10 rounded-sm transition-all duration-75"
+            key={det.trackId ?? i}
+            className={`absolute border-2 rounded-sm transition-all duration-75 ${tone}`}
             style={{
               left: `${left}%`,
               top: `${top}%`,
@@ -32,8 +49,8 @@ const DetectionOverlay: React.FC<DetectionOverlayProps> = ({ detections, width, 
               height: `${boxHeight}%`,
             }}
           >
-            <div className="absolute -top-6 left-0 bg-red-600 text-[10px] font-black text-white px-2 py-0.5 rounded-t-sm whitespace-nowrap uppercase tracking-tighter">
-              Person {(det.confidence * 100).toFixed(0)}%
+            <div className={`absolute -top-6 left-0 text-[10px] font-black text-white px-2 py-0.5 rounded-t-sm whitespace-nowrap uppercase tracking-tighter ${labelTone}`}>
+              Person{det.trackId ? ` #${det.trackId}` : ''} {(det.confidence * 100).toFixed(0)}%
             </div>
             
             {/* Corner Accents */}

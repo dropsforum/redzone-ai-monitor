@@ -32,6 +32,7 @@ class Config:
             "model_size": "yolo26n.pt",  # latest nano Ultralytics model for speed
             "model_imgsz": 640,
             "model_device": "auto",  # auto prefers MPS on Apple Silicon
+            "detector_backend": "pytorch",
             "confidence_threshold": 0.5,  # 50% confidence minimum
             "detection_interval_ms": 100,
             "alert_cooldown": 5,  # seconds between alerts
@@ -42,6 +43,10 @@ class Config:
             "bbox_color": (255, 0, 0),  # Blue BGR for bounding boxes
             "alert_min_overlap": 0.15,  # min bbox fraction overlapping zone
             "alert_activation_frames": 3,  # frames required before alert
+            "zone_entry_mode": "footpoint",
+            "entry_confirm_ms": 300,
+            "exit_grace_ms": 750,
+            "tracker_max_gap_ms": 750,
             "show_debug": True,
         }
         

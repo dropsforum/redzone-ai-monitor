@@ -38,13 +38,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .ai_detector import AIDetector
+from .ai_detector import AIDetector, TrackedDetection
 from .alert_system import AlertSystem
+from .breach_state import BreachDecision, BreachStateMachine, TrackObservation
 from .breach_recorder import BreachRecorder, format_duration
 from .camera_manager import CameraManager
 from .config import Config
+from .zone_entry import classify_foot_point
 
-Detection = Tuple[int, int, int, int, float]
+Detection = TrackedDetection
 Point = Tuple[float, float]
 
 ACCENT = "#55799a"
@@ -288,13 +290,13 @@ class VideoPanel(QFrame):
         font.setPointSize(8)
         font.setBold(True)
         painter.setFont(font)
-        for x1, y1, x2, y2, conf in self.detections:
+        for x1, y1, x2, y2, conf, track_id in self.detections:
             box = QRectF(rect.left() + x1 * sx, rect.top() + y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy)
             painter.setPen(QPen(QColor(RED), 2))
             painter.setBrush(QColor(220, 38, 38, 32))
             painter.drawRect(box)
-            label = f"Person {round(conf * 100)}%"
-            label_rect = QRectF(box.left(), max(rect.top(), box.top() - 24), 82, 22)
+            label = f"Person #{track_id} {round(conf * 100)}%"
+            label_rect = QRectF(box.left(), max(rect.top(), box.top() - 24), 112, 22)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(RED))
             painter.drawRoundedRect(label_rect, 5, 5)
@@ -334,7 +336,16 @@ class VideoPanel(QFrame):
 
 
 class RedZoneQtWindow(QMainWindow):
-    def __init__(self, initial_video: Optional[Path] = None, camera_index: Optional[int] = None):
+    def __init__(
+        self,
+        initial_video: Optional[Path] = None,
+        camera_index: Optional[int] = None,
+        model_name: Optional[str] = None,
+        model_device: Optional[str] = None,
+        detector_backend: Optional[str] = None,
+        confidence_threshold: Optional[float] = None,
+        model_imgsz: Optional[int] = None,
+    ):
         super().__init__()
         self.config = Config()
         self.camera = CameraManager(
@@ -346,10 +357,19 @@ class RedZoneQtWindow(QMainWindow):
             video_path=self.config.get("video_file_path", ""),
         )
         self.detector = AIDetector(
-            model_name=self.config.get("model_size", "yolo26n.pt"),
-            confidence_threshold=float(self.config.get("confidence_threshold", 0.5)),
-            imgsz=int(self.config.get("model_imgsz", 640)),
-            device=self.config.get("model_device", "auto"),
+            model_name=model_name or self.config.get("model_size", "yolo26n.pt"),
+            confidence_threshold=(
+                confidence_threshold
+                if confidence_threshold is not None
+                else float(self.config.get("confidence_threshold", 0.5))
+            ),
+            imgsz=(
+                model_imgsz
+                if model_imgsz is not None
+                else int(self.config.get("model_imgsz", 640))
+            ),
+            device=model_device or self.config.get("model_device", "auto"),
+            backend=detector_backend or self.config.get("detector_backend", "pytorch"),
         )
         self.alert = AlertSystem(cooldown_seconds=int(self.config.get("alert_cooldown", 5)))
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -366,15 +386,19 @@ class RedZoneQtWindow(QMainWindow):
         self.traffic = "green"
         self.warning_buffer = 0.10
         self.breach_recorder = BreachRecorder()
+        self.breach_state_machine = self._make_breach_state_machine()
         self.breach_mode = "minute"
         self.breach_report_type = "records"
         self.last_breach_table_sync = 0.0
+        self.last_heartbeat_at = 0.0
         self.frame_count = 0
         self.last_fps = time.monotonic()
         self.last_detection_at = 0.0
         self.fps = 0
+        self.dropped_inference_requests = 0
         self.is_video_fullscreen = False
         self._normal_geometry = None
+        self.last_discontinuity_serial = self.camera.discontinuity_serial
 
         self.setWindowTitle("DROPS Red Zone Monitoring")
         self.resize(760, 980)
@@ -547,7 +571,10 @@ class RedZoneQtWindow(QMainWindow):
         self.breach_reset_btn.setToolTip("Reset breach recording")
         self.breach_reset_btn.clicked.connect(self._reset_breach_recording)
         self.breach_export_btn = QPushButton("XLSX")
-        self.breach_export_btn.setToolTip("Export Excel workbook with Records, Aggregated Results, and Overall Metrics tabs")
+        self.breach_export_btn.setToolTip(
+            "Export Records, Person Breaches, Aggregated Results, "
+            "Overall Metrics, and Session Metadata"
+        )
         self.breach_export_btn.clicked.connect(self._export_breach_excel)
         breach_layout.addWidget(breach_title)
         breach_layout.addWidget(self.breach_mode_combo)
@@ -573,6 +600,13 @@ class RedZoneQtWindow(QMainWindow):
             "End",
             "Duration",
         ])
+        self.people_table = self._make_report_table([
+            "Person ID",
+            "Start",
+            "End",
+            "Duration",
+            "Max Confidence",
+        ])
         self.metrics_table = self._make_report_table([
             "Bucket Start",
             "Bucket End",
@@ -582,6 +616,7 @@ class RedZoneQtWindow(QMainWindow):
             "Breach %",
         ])
         self.breach_tabs.addTab(self.records_table, "Records")
+        self.breach_tabs.addTab(self.people_table, "People")
         self.breach_tabs.addTab(self.metrics_table, "Metrics")
         report_layout.addWidget(self.breach_tabs)
         layout.addWidget(self.breach_report_panel)
@@ -686,6 +721,13 @@ class RedZoneQtWindow(QMainWindow):
         if self.config.zone_points:
             self.zone = [(x / max(1, self.camera.width), y / max(1, self.camera.height)) for x, y in self.config.zone_points]
 
+    def _make_breach_state_machine(self) -> BreachStateMachine:
+        return BreachStateMachine(
+            entry_confirm_ms=int(self.config.get("entry_confirm_ms", 300)),
+            exit_grace_ms=int(self.config.get("exit_grace_ms", 750)),
+            tracker_max_gap_ms=int(self.config.get("tracker_max_gap_ms", 750)),
+        )
+
     def _start_ai_loading(self):
         self.ai_chip.setText("Loading...")
         self.video_panel.set_state(ai_status="Initializing AI")
@@ -709,7 +751,13 @@ class RedZoneQtWindow(QMainWindow):
             return
         idx = self.camera_combo.currentData()
         if idx is not None and idx != self.camera.camera_index:
-            self.camera.switch_camera(int(idx))
+            self._stop_monitoring()
+            if self.camera.switch_camera(int(idx)):
+                self.detector.reset_tracker()
+                self.last_discontinuity_serial = self.camera.discontinuity_serial
+                self.current_frame = None
+                self.detections = []
+                self.traffic = "green"
 
     def _set_source_mode(self, mode: str):
         source = "video" if mode == "file" else mode
@@ -730,6 +778,7 @@ class RedZoneQtWindow(QMainWindow):
         elif self.video_path is not None:
             self.camera.video_path = self.video_path
         self.camera.start()
+        self.last_discontinuity_serial = self.camera.discontinuity_serial
         self.video_panel.set_state(source_mode=self.source_mode, video_label=self.video_path.name if self.video_path else "")
         self._sync_controls()
         self._sync_breach_ui(force_tables=True)
@@ -741,6 +790,14 @@ class RedZoneQtWindow(QMainWindow):
         self.config.set("video_file_path", str(path))
         self.recorded_info.setText(path.name)
         self._set_source_mode("video")
+
+    def _seek_video(self, frame_number: int) -> bool:
+        """Seek hook for recorded-video controls and reset temporal identity."""
+        if not self.camera.seek_video(frame_number):
+            return False
+        self.last_discontinuity_serial = self.camera.discontinuity_serial
+        self._reset_tracking_state()
+        return True
 
     def _choose_video(self):
         file_name, _ = QFileDialog.getOpenFileName(
@@ -755,18 +812,21 @@ class RedZoneQtWindow(QMainWindow):
     def _toggle_monitor(self):
         if not self.detector.is_loaded or len(self.zone) < 3 or self.current_frame is None:
             return
-        self.is_monitoring = not self.is_monitoring
         if self.is_monitoring:
-            self.breach_recorder.start()
+            self._stop_monitoring()
         else:
-            self.breach_recorder.stop()
-        if self.source_mode == "file":
-            if self.is_monitoring:
-                self.camera.start_playback(restart=True)
-            else:
-                self.camera.pause_playback()
-        if not self.is_monitoring:
+            now = time.time()
+            self.detector.reset_tracker()
+            self.breach_state_machine = self._make_breach_state_machine()
+            self.detections = []
             self.traffic = "green"
+            self.dropped_inference_requests = 0
+            self.last_heartbeat_at = now
+            self.breach_recorder.start(now, self._session_metadata())
+            self.is_monitoring = True
+            if self.source_mode == "file":
+                self.camera.start_playback(restart=True)
+                self.last_discontinuity_serial = self.camera.discontinuity_serial
         self._sync_controls()
         self._sync_breach_ui(force_tables=True)
 
@@ -775,18 +835,17 @@ class RedZoneQtWindow(QMainWindow):
             return
         self.is_drawing = not self.is_drawing
         if self.is_drawing:
-            self.is_monitoring = False
-            self.breach_recorder.stop()
+            self._stop_monitoring()
             if self.source_mode == "file":
                 self.camera.pause_playback()
         else:
             self.zone = self.video_panel.zone
+            self._reset_tracking_state()
         self._sync_controls()
 
     def _reset_zone(self):
-        self.is_monitoring = False
+        self._stop_monitoring()
         self.is_drawing = False
-        self.breach_recorder.reset()
         if self.source_mode == "file":
             self.camera.pause_playback()
         self.zone = []
@@ -805,13 +864,59 @@ class RedZoneQtWindow(QMainWindow):
         self._sync_breach_ui(force_tables=True)
 
     def _reset_runtime(self):
-        self.is_monitoring = False
+        self._stop_monitoring()
         self.detections = []
         self.traffic = "green"
         self.fps = 0
         self.frame_count = 0
         self.current_frame = None
-        self.breach_recorder.reset()
+
+    def _stop_monitoring(self):
+        now = time.time()
+        if self.is_monitoring:
+            decision = self.breach_state_machine.reset(now)
+            self._apply_breach_decision(decision, now, [])
+            self.breach_recorder.stop(now)
+        else:
+            self.breach_state_machine.reset(now)
+        self.is_monitoring = False
+        self.detector.reset_tracker()
+        if self.detect_future is not None:
+            self.detect_future.cancel()
+            self.detect_future = None
+        if self.source_mode == "file":
+            self.camera.pause_playback()
+        self.detections = []
+        self.traffic = "green"
+
+    def _reset_tracking_state(self):
+        now = time.time()
+        decision = self.breach_state_machine.reset(now)
+        if self.is_monitoring:
+            self._apply_breach_decision(decision, now, [])
+        self.detector.reset_tracker()
+        if self.detect_future is not None:
+            self.detect_future.cancel()
+            self.detect_future = None
+        self.detections = []
+        self.traffic = "green"
+
+    def _session_metadata(self) -> dict:
+        return {
+            "source_type": "recorded_video" if self.source_mode == "file" else "camera",
+            "model_name": self.detector.model_name,
+            "model_version": self.detector.model_version,
+            "detector_backend": self.detector.backend_name,
+            "zone": self.zone,
+            "settings": {
+                "zone_entry_mode": self.config.get("zone_entry_mode", "footpoint"),
+                "entry_confirm_ms": int(self.config.get("entry_confirm_ms", 300)),
+                "exit_grace_ms": int(self.config.get("exit_grace_ms", 750)),
+                "tracker_max_gap_ms": int(self.config.get("tracker_max_gap_ms", 750)),
+                "warning_buffer": self.warning_buffer,
+                "confidence_threshold": self.detector.confidence_threshold,
+            },
+        }
 
     def _sync_controls(self):
         ready = self.detector.is_loaded
@@ -829,15 +934,27 @@ class RedZoneQtWindow(QMainWindow):
         self._sync_breach_ui(force_tables=True)
 
     def _set_breach_report_tab(self, index: int):
-        self.breach_report_type = "metrics" if index == 1 else "records"
+        self.breach_report_type = {
+            0: "records",
+            1: "people",
+            2: "metrics",
+        }.get(index, "records")
         self.breach_mode_combo.setEnabled(self.breach_report_type == "metrics")
         self._sync_breach_ui(force_tables=True)
 
     def _reset_breach_recording(self):
         was_monitoring = self.is_monitoring
+        if was_monitoring:
+            self._stop_monitoring()
         self.breach_recorder.reset()
         if was_monitoring:
-            self.breach_recorder.start()
+            now = time.time()
+            self.detector.reset_tracker()
+            self.breach_state_machine = self._make_breach_state_machine()
+            self.breach_recorder.start(now, self._session_metadata())
+            self.is_monitoring = True
+            if self.source_mode == "file":
+                self.camera.start_playback(restart=False)
         self._sync_breach_ui(force_tables=True)
 
     def _export_breach_excel(self):
@@ -856,7 +973,8 @@ class RedZoneQtWindow(QMainWindow):
         self.breach_metric.setText(
             f"Breach {format_duration(float(summary['breach_seconds']))} · "
             f"Rate {summary['breach_percent']:.0f}% · "
-            f"Records {summary['breach_count']}/{summary['clear_count']}"
+            f"Records {summary['breach_count']}/{summary['clear_count']} · "
+            f"People {summary['unique_people']}"
         )
         current = "Breach" if summary["current_state"] == "breach" else "Clear"
         suffix = ""
@@ -889,6 +1007,25 @@ class RedZoneQtWindow(QMainWindow):
                     item.setFont(font)
                 self.records_table.setItem(row, column, item)
 
+        people = self.breach_recorder.person_events()[-200:]
+        self.people_table.setRowCount(len(people))
+        for row, event in enumerate(people):
+            values = [
+                f"#{event.track_id}",
+                self._format_timestamp(event.start),
+                self._format_timestamp(event.end),
+                format_duration(event.end - event.start),
+                f"{event.max_confidence * 100:.1f}%",
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setForeground(QColor(RED))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                self.people_table.setItem(row, column, item)
+
         buckets = self.breach_recorder.buckets(self.breach_mode)[-200:]
         self.metrics_table.setRowCount(len(buckets))
         for row, bucket in enumerate(buckets):
@@ -920,6 +1057,9 @@ class RedZoneQtWindow(QMainWindow):
             self._sync_controls()
 
         ret, frame = self.camera.read_frame()
+        if self.camera.discontinuity_serial != self.last_discontinuity_serial:
+            self.last_discontinuity_serial = self.camera.discontinuity_serial
+            self._reset_tracking_state()
         if ret and frame is not None:
             self.current_frame = frame
             self.frame_count += 1
@@ -945,6 +1085,7 @@ class RedZoneQtWindow(QMainWindow):
         self.zone = self.video_panel.zone
         self._sync_controls()
         self._sync_breach_ui()
+        self._heartbeat_if_due()
 
     def _maybe_detect(self, frame: np.ndarray):
         now = time.monotonic()
@@ -956,39 +1097,93 @@ class RedZoneQtWindow(QMainWindow):
             self.detections = self.detect_future.result()
             self._evaluate_alerts(frame)
             self.detect_future = None
-        if self.detect_future is None and now - self.last_detection_at >= 0.10:
-            self.last_detection_at = now
+        detection_interval = float(self.config.get("detection_interval_ms", 100)) / 1000.0
+        if now - self.last_detection_at < detection_interval:
+            return
+        self.last_detection_at = now
+        if self.detect_future is None:
             self.detect_future = self.executor.submit(self.detector.detect_people, frame.copy())
+        else:
+            self.dropped_inference_requests += 1
 
     def _evaluate_alerts(self, frame: np.ndarray):
-        if not self.detections:
-            self.traffic = "green"
-            self.breach_recorder.update(False)
-            return
         h, w = frame.shape[:2]
-        abs_zone = [(int(x * w), int(y * h)) for x, y in self.zone]
-        zone_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.fillPoly(zone_mask, [np.array(abs_zone, np.int32).reshape((-1, 1, 2))], 255)
-        red_hit = False
-        yellow_hit = False
-        for x1, y1, x2, y2, _ in self.detections:
-            corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2), ((x1 + x2) // 2, (y1 + y2) // 2)]
-            if any(0 <= x < w and 0 <= y < h and zone_mask[y, x] for x, y in corners):
-                red_hit = True
-                break
-            pad = int(max(w, h) * self.warning_buffer)
-            rect_mask = np.zeros((h, w), dtype=np.uint8)
-            cv2.rectangle(rect_mask, (max(0, x1 - pad), max(0, y1 - pad)), (min(w - 1, x2 + pad), min(h - 1, y2 + pad)), 255, -1)
-            if cv2.countNonZero(cv2.bitwise_and(zone_mask, rect_mask)):
-                yellow_hit = True
-        if red_hit:
-            self.traffic = "red"
-            self.breach_recorder.update(True)
-            if self.audio_enabled:
-                self.alert.trigger_alert()
-        else:
-            self.traffic = "yellow" if yellow_hit else "green"
-            self.breach_recorder.update(False)
+        observations: list[TrackObservation] = []
+        for detection in self.detections:
+            contact = classify_foot_point(
+                detection.x1,
+                detection.x2,
+                detection.y2,
+                self.zone,
+                w,
+                h,
+                self.warning_buffer,
+            )
+            observations.append(TrackObservation(
+                track_id=detection.track_id,
+                inside=contact.inside,
+                near=contact.near,
+                confidence=detection.confidence,
+            ))
+
+        now = time.time()
+        decision = self.breach_state_machine.update(observations, now)
+        self._apply_breach_decision(decision, now, self.detections)
+
+    def _apply_breach_decision(
+        self,
+        decision: BreachDecision,
+        now: float,
+        detections: List[Detection],
+    ) -> None:
+        confidence_by_track = {
+            detection.track_id: detection.confidence
+            for detection in detections
+        }
+        for event in decision.started_events:
+            self.breach_recorder.start_person_breach(
+                event.track_id,
+                event.start,
+                event.max_confidence,
+            )
+        for track_id in decision.active_track_ids:
+            confidence = confidence_by_track.get(track_id)
+            if confidence is not None:
+                self.breach_recorder.update_person_confidence(track_id, confidence)
+        for event in decision.ended_events:
+            self.breach_recorder.end_person_breach(
+                event.track_id,
+                event.end,
+                event.max_confidence,
+            )
+        self.traffic = decision.traffic
+        state_time = (
+            max(event.end for event in decision.ended_events)
+            if decision.exited_breach and decision.ended_events
+            else now
+        )
+        self.breach_recorder.update(decision.is_breach, state_time)
+        if decision.entered_breach and self.audio_enabled:
+            self.alert.trigger_alert()
+
+    def _heartbeat_if_due(self) -> None:
+        if not self.is_monitoring:
+            return
+        now = time.time()
+        if now - self.last_heartbeat_at < 5.0:
+            return
+        self.last_heartbeat_at = now
+        health = self.detector.last_health
+        self.breach_recorder.heartbeat(now, {
+            "observed_fps": self.fps,
+            "preprocess_ms": health.preprocess_ms,
+            "inference_ms": health.inference_ms,
+            "postprocess_ms": health.postprocess_ms,
+            "total_ms": health.total_ms,
+            "dropped_requests": self.dropped_inference_requests,
+            "detector_errors": health.detector_errors,
+            "backend": health.backend,
+        })
 
     def _screenshot(self):
         if self.current_frame is None:
@@ -1009,9 +1204,9 @@ class RedZoneQtWindow(QMainWindow):
             cv2.fillPoly(overlay, [pts.reshape((-1, 1, 2))], (38, 38, 220))
             frame = cv2.addWeighted(overlay, 0.3, frame, 0.7, 0)
             cv2.polylines(frame, [pts.reshape((-1, 1, 2))], True, (38, 38, 220), 4)
-        for x1, y1, x2, y2, conf in self.detections:
+        for x1, y1, x2, y2, conf, track_id in self.detections:
             cv2.rectangle(frame, (x1, y1), (x2, y2), (154, 121, 85), 3)
-            label = f"PERSON {round(conf * 100)}%"
+            label = f"PERSON #{track_id} {round(conf * 100)}%"
             cv2.putText(frame, label, (x1 + 5, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         cv2.putText(frame, "powered by dropsforum.org", (w // 4, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (154, 121, 85), 2)
         cv2.imwrite(path, frame)
@@ -1021,16 +1216,31 @@ class RedZoneQtWindow(QMainWindow):
             h, w = self.current_frame.shape[:2]
             self.config.zone_points = [(int(x * w), int(y * h)) for x, y in self.zone]
             self.config.save()
+        self._stop_monitoring()
+        self.breach_recorder.close()
         self.camera.stop()
         self.executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
 
-def run_qt_app(initial_video: Optional[str] = None, camera_index: Optional[int] = None) -> int:
+def run_qt_app(
+    initial_video: Optional[str] = None,
+    camera_index: Optional[int] = None,
+    model_name: Optional[str] = None,
+    model_device: Optional[str] = None,
+    detector_backend: Optional[str] = None,
+    confidence_threshold: Optional[float] = None,
+    model_imgsz: Optional[int] = None,
+) -> int:
     app = QApplication.instance() or QApplication([])
     window = RedZoneQtWindow(
         initial_video=Path(initial_video).expanduser() if initial_video else None,
         camera_index=camera_index,
+        model_name=model_name,
+        model_device=model_device,
+        detector_backend=detector_backend,
+        confidence_threshold=confidence_threshold,
+        model_imgsz=model_imgsz,
     )
     window.show()
     return app.exec()

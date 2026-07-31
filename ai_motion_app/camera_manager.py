@@ -36,6 +36,8 @@ class CameraManager:
         self.playback_active = False
         self.playback_started_at = 0.0
         self.playback_started_frame = 0
+        self.playback_last_target_frame = 0
+        self.discontinuity_serial = 0
         
     def start(self) -> bool:
         """Initialize and start camera capture"""
@@ -143,26 +145,53 @@ class CameraManager:
         if restart:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             self.current_frame_number = 0
+            self.current_frame = None
+            self.discontinuity_serial += 1
         self.playback_active = True
         self.playback_started_at = time.monotonic()
         self.playback_started_frame = self.current_frame_number
+        self.playback_last_target_frame = self.current_frame_number
 
     def pause_playback(self):
         """Pause recorded-video playback without releasing the file."""
         if self.source_type == "video":
             self.playback_active = False
 
-    def _sync_video_position(self):
-        """Skip frames when display work falls behind so videos keep real speed."""
+    def seek_video(self, frame_number: int) -> bool:
+        """Seek a recorded video and mark the tracker timeline discontinuous."""
+        if self.source_type != "video" or self.cap is None:
+            return False
+        target = max(0, int(frame_number))
+        if self.total_frames > 0:
+            target = min(target, self.total_frames - 1)
+        if not self.cap.set(cv2.CAP_PROP_POS_FRAMES, target):
+            return False
+        self.current_frame_number = target
+        self.current_frame = None
+        self.playback_started_at = time.monotonic()
+        self.playback_started_frame = target
+        self.playback_last_target_frame = target
+        self.discontinuity_serial += 1
+        return True
+
+    def _sync_video_position(self) -> Optional[int]:
+        """Return the wall-clock target frame and seek if playback falls behind."""
         if self.source_type != "video" or self.cap is None or not self.playback_active or self.fps <= 0:
-            return
+            return None
         elapsed = time.monotonic() - self.playback_started_at
         target_frame = self.playback_started_frame + int(elapsed * float(self.fps))
         if self.total_frames > 0:
             target_frame = target_frame % self.total_frames
+            if target_frame < self.playback_last_target_frame:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                self.current_frame_number = target_frame
+                self.current_frame = None
+                self.discontinuity_serial += 1
+        self.playback_last_target_frame = target_frame
         if target_frame > self.current_frame_number + 1:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
             self.current_frame_number = target_frame
+        return target_frame
 
     def enumerate_cameras(self, max_devices: int = 8) -> List[int]:
         """Detect available camera indices by probing."""
@@ -235,13 +264,22 @@ class CameraManager:
                 return True, frame.copy()
             return False, None
 
-        self._sync_video_position()
+        target_frame = self._sync_video_position()
+        if (
+            self.source_type == "video"
+            and target_frame is not None
+            and target_frame <= self.current_frame_number
+            and self.current_frame is not None
+        ):
+            return True, self.current_frame.copy()
         ret, frame = self.cap.read()
         if self.source_type == "video":
             if not ret or frame is None:
                 # Loop back to start
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self.current_frame_number = 0
+                self.current_frame = None
+                self.discontinuity_serial += 1
                 self.start_playback(restart=False)
                 ret, frame = self.cap.read()
                 if not ret or frame is None:

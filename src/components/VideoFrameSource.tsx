@@ -30,6 +30,7 @@ interface VideoFrameSourceProps {
   videoLabel?: string | null;
   frameIntervalMs?: number;
   onVideoFileDrop?: (file: File) => void;
+  onTimelineReset?: (reason: 'seek' | 'loop') => void;
 }
 
 export interface VideoFrameSourceHandle {
@@ -82,12 +83,14 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
   videoLabel,
   frameIntervalMs = 100,
   onVideoFileDrop,
+  onTimelineReset,
 }, ref) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastFrameTimeRef = useRef(0);
+  const lastPlaybackTimeRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isDraggingVideo, setIsDraggingVideo] = useState(false);
@@ -207,6 +210,7 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
     video.pause();
     video.defaultPlaybackRate = 1;
     video.playbackRate = 1;
+    lastPlaybackTimeRef.current = 0;
     video.srcObject = null;
     if (videoUrl) {
       video.src = videoUrl;
@@ -245,6 +249,18 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
       const now = performance.now();
 
       if (
+        sourceMode === 'file'
+        && video
+        && !video.seeking
+        && video.currentTime + 0.25 < lastPlaybackTimeRef.current
+      ) {
+        onTimelineReset?.('loop');
+      }
+      if (video && sourceMode === 'file') {
+        lastPlaybackTimeRef.current = video.currentTime;
+      }
+
+      if (
         video
         && canvas
         && ctx
@@ -269,7 +285,7 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [frameIntervalMs, onFrame]);
+  }, [frameIntervalMs, onFrame, onTimelineReset, sourceMode]);
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
@@ -373,6 +389,15 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
             playsInline
             muted={sourceMode === 'camera'}
             onLoadedMetadata={handleLoadedMetadata}
+            onSeeking={() => {
+              if (sourceMode === 'file') {
+                lastPlaybackTimeRef.current = videoRef.current?.currentTime ?? 0;
+                onTimelineReset?.('seek');
+              }
+            }}
+            onEnded={() => {
+              if (sourceMode === 'file') onTimelineReset?.('loop');
+            }}
             className="absolute max-w-none max-h-none"
             style={frameStyle}
           />

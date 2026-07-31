@@ -89,7 +89,34 @@ export class BreachRecorder {
   }
 
   snapshot(mode: BreachAggregateMode, nowMs = Date.now()): BreachSnapshot {
-    const segments = this.getSegments(nowMs);
+    return summarizeBreachSegments(this.getSegments(nowMs), mode);
+  }
+
+  private closeActive(nowMs: number) {
+    if (!this.activeSegment) return;
+    this.completedSegments.push({
+      ...this.activeSegment,
+      endMs: Math.max(this.activeSegment.startMs, nowMs),
+    });
+  }
+
+  private getSegments(nowMs: number) {
+    const segments = [...this.completedSegments];
+    if (this.running && this.activeSegment) {
+      segments.push({
+        ...this.activeSegment,
+        endMs: Math.max(this.activeSegment.endMs, nowMs),
+      });
+    }
+    return segments.filter(segment => segment.endMs > segment.startMs);
+  }
+}
+
+export function summarizeBreachSegments(
+  inputSegments: BreachSegment[],
+  mode: BreachAggregateMode,
+): BreachSnapshot {
+    const segments = inputSegments.map(segment => ({ ...segment }));
     const buckets = aggregateSegments(segments, mode);
     const totalBreachMs = segments
       .filter(segment => segment.state === 'breach')
@@ -112,26 +139,6 @@ export class BreachRecorder {
       periodStartMs: segments[0]?.startMs ?? null,
       periodEndMs: segments.at(-1)?.endMs ?? null,
     };
-  }
-
-  private closeActive(nowMs: number) {
-    if (!this.activeSegment) return;
-    this.completedSegments.push({
-      ...this.activeSegment,
-      endMs: Math.max(this.activeSegment.startMs, nowMs),
-    });
-  }
-
-  private getSegments(nowMs: number) {
-    const segments = [...this.completedSegments];
-    if (this.running && this.activeSegment) {
-      segments.push({
-        ...this.activeSegment,
-        endMs: Math.max(this.activeSegment.endMs, nowMs),
-      });
-    }
-    return segments.filter(segment => segment.endMs > segment.startMs);
-  }
 }
 
 export function aggregateSegments(segments: BreachSegment[], mode: BreachAggregateMode): BreachBucket[] {
