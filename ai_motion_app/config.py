@@ -29,7 +29,7 @@ class Config:
             "camera_fps": 15,
             "video_source": "camera",  # "camera" or "video"
             "video_file_path": "",  # Path to video file when using video source
-            "model_size": "yolo26n.pt",  # latest nano Ultralytics model for speed
+            "model_size": "yolo26n-seg.pt",  # person silhouettes avoid close-range bbox errors
             "model_imgsz": 640,
             "model_device": "auto",  # auto prefers MPS on Apple Silicon
             "detector_backend": "pytorch",
@@ -43,7 +43,10 @@ class Config:
             "bbox_color": (255, 0, 0),  # Blue BGR for bounding boxes
             "alert_min_overlap": 0.15,  # min bbox fraction overlapping zone
             "alert_activation_frames": 3,  # frames required before alert
-            "zone_entry_mode": "footpoint",
+            "zone_entry_mode": "silhouette",
+            "mask_overlap_threshold": 0.02,
+            "mask_contact_tolerance": 0.01,
+            "bottom_clip_ratio": 0.98,
             "entry_confirm_ms": 300,
             "exit_grace_ms": 750,
             "tracker_max_gap_ms": 750,
@@ -61,6 +64,10 @@ class Config:
                     data = json.load(f)
                     self.settings.update(data.get('settings', {}))
                     self.zone_points = [tuple(p) for p in data.get('zone_points', [])]
+                    if self.settings.get("model_size") == "yolo26n.pt":
+                        self.settings["model_size"] = "yolo26n-seg.pt"
+                    if self.settings.get("zone_entry_mode", "footpoint") == "footpoint":
+                        self.settings["zone_entry_mode"] = "silhouette"
                 print(f"✓ Configuration loaded from {self.config_file}")
             except Exception as e:
                 print(f"⚠ Error loading config: {e}")

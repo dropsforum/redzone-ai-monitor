@@ -38,14 +38,16 @@ for pkg in [
     except Exception:
         pass
 
-# Bundle local model and zone config if present
+# Bundle the detection fallback and close-range segmentation model if present.
 local_datas = []
-for model_path in [
-    Path(project_root) / "models" / "yolo26n.pt",
-    Path(project_root) / "yolo26n.pt",
-]:
-    if model_path.exists():
-        local_datas.append((str(model_path), "models"))
+for model_name in ["yolo26n.pt", "yolo26n-seg.pt"]:
+    for model_path in [
+        Path(project_root) / "models" / model_name,
+        Path(project_root) / model_name,
+    ]:
+        if model_path.exists():
+            local_datas.append((str(model_path), "models"))
+            break
 
 for asset_dir in [
     Path(project_root) / "assets",
@@ -97,8 +99,8 @@ app = BUNDLE(
         "NSCameraUsageDescription": "DROPS Red Zone Monitor uses the camera to analyze red-zone safety footage locally on this Mac.",
         "CFBundleName": "DROPS Red Zone Monitoring",
         "CFBundleDisplayName": "DROPS Red Zone Monitoring",
-        "CFBundleShortVersionString": "0.1.0",
-        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "0.2.0",
+        "CFBundleVersion": "2",
         "LSMinimumSystemVersion": "12.0",
         "LSApplicationCategoryType": "public.app-category.utilities",
         "CFBundleDocumentTypes": [

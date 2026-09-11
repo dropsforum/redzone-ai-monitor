@@ -1,17 +1,45 @@
 # YOLO26 Model Operations
 
-This project uses the official `yolo26n.pt` checkpoint with **Ultralytics
-8.4.112**. The browser production path is the checked-in application code
-using ONNX Runtime Web and a locally supplied ONNX artifact. LiteRT/WebGPU and
-CoreML FP16 are experimental benchmark candidates only; they must not become
-defaults based on vendor speed claims alone.
+The native Mac build pins **Ultralytics 8.4.146** and bundles the official
+`yolo26n-seg.pt` checkpoint alongside `yolo26n.pt`. The segmentation model is
+used for close-range zone evaluation because a nearby person can fill much of
+the frame: their rectangular detection box overlaps large background areas,
+while their feet may be cropped so a box-derived floor point is unreliable.
+The instance mask provides the person's actual visible silhouette for a more
+precise overlap measurement. The detection checkpoint remains bundled as a
+fallback and for compatibility during the segmentation rollout.
+
+The browser production path remains the checked-in application code using
+ONNX Runtime Web and a locally supplied ONNX artifact. LiteRT/WebGPU and CoreML
+FP16 are experimental benchmark candidates only; they must not become defaults
+based on vendor speed claims alone.
+
+## Native Mac checkpoints
+
+The Mac packaging script downloads these immutable files directly from the
+official [Ultralytics model-assets release](https://github.com/ultralytics/assets/releases/tag/v8.4.0)
+and verifies their SHA-256 hashes before PyInstaller runs:
+
+| Checkpoint | Purpose | Size | SHA-256 |
+| --- | --- | ---: | --- |
+| `yolo26n.pt` | Detection fallback | 5,544,453 bytes | `9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef` |
+| `yolo26n-seg.pt` | Close-range person silhouette overlap | 6,719,965 bytes | `361fbfabab285c3237700b6bb91d7ecfa602cd945fffda8dbe1242829b71e73f` |
+
+Source URLs:
+
+- `https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.pt`
+- `https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-seg.pt`
+
+Both files are downloaded into the ignored `models/` directory and bundled
+under the app's `models/` resource directory. They remain untracked and must
+not be committed to the public repository.
 
 ## Reproducible exports
 
 Create an environment with the pinned exporter:
 
 ```bash
-python -m pip install ultralytics==8.4.112 onnx
+python -m pip install ultralytics==8.4.146 onnx
 ```
 
 The helper prints its settings without importing Ultralytics:
@@ -64,7 +92,9 @@ as CoreML.
 
 ## Verified export record
 
-The commands above were executed on 2026-07-31 with Ultralytics `8.4.112`.
+The detection export commands below were executed on 2026-07-31 with
+Ultralytics `8.4.112`; this is a historical record for the existing browser
+artifacts, not the current Mac runtime pin.
 The source `yolo26n.pt` checkpoint SHA-256 was
 `9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef`.
 
@@ -100,7 +130,7 @@ deterministic over sorted relative file names and file hashes:
 python scripts/generate_model_provenance.py \
   public/models/yolo26n.onnx \
   --source-model yolo26n.pt \
-  --ultralytics-version 8.4.112 \
+  --ultralytics-version 8.4.146 \
   --export-command 'python scripts/export_yolo26n.py --format onnx --weights yolo26n.pt --output-dir public/models --force'
 ```
 

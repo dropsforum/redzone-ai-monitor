@@ -39,16 +39,36 @@ python -m pip install -r requirements_ai.txt
 
 mkdir -p models
 python - <<'PY'
+from hashlib import sha256
+from shutil import copyfileobj
 from pathlib import Path
-from ultralytics import YOLO
+from urllib.request import urlopen
 
-target = Path("models/yolo26n.pt")
-if not target.exists():
-    model = YOLO("yolo26n.pt")
-    source = Path(getattr(model, "ckpt_path", "yolo26n.pt"))
-    if source.exists() and source.resolve() != target.resolve():
-        target.write_bytes(source.read_bytes())
-print(f"Model ready: {target if target.exists() else 'Ultralytics cache'}")
+models = {
+    "yolo26n.pt": {
+        "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.pt",
+        "sha256": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef",
+    },
+    "yolo26n-seg.pt": {
+        "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-seg.pt",
+        "sha256": "361fbfabab285c3237700b6bb91d7ecfa602cd945fffda8dbe1242829b71e73f",
+    },
+}
+
+for name, metadata in models.items():
+    target = Path("models") / name
+    if not target.exists():
+        print(f"Downloading official Ultralytics checkpoint: {name}")
+        with urlopen(metadata["url"]) as response, target.open("wb") as output:
+            copyfileobj(response, output)
+
+    digest = sha256(target.read_bytes()).hexdigest()
+    if digest != metadata["sha256"]:
+        target.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"SHA-256 mismatch for {name}: expected {metadata['sha256']}, got {digest}"
+        )
+    print(f"Model ready: {target} ({digest})")
 PY
 
 if [[ "${MACOS_REUSE_DIST:-0}" == "1" && -d "$APP_PATH" ]]; then

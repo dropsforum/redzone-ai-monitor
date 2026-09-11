@@ -42,9 +42,15 @@ class FakeBox:
         self.conf = FakeTensor(confidence)
 
 
+class FakeMasks:
+    def __init__(self, polygons):
+        self.xy = polygons
+
+
 class FakeResult:
-    def __init__(self, boxes):
+    def __init__(self, boxes, masks=None):
         self.boxes = boxes
+        self.masks = masks
         self.speed = {"preprocess": 1.0, "inference": 2.0, "postprocess": 3.0}
 
 
@@ -67,10 +73,12 @@ class FakeModel:
         self.predictor = FakePredictor()
         self.calls = []
         self.raw_track_id = 42
+        self.mask_polygon = None
 
     def track(self, frame, **kwargs):
         self.calls.append((frame, kwargs))
-        return [FakeResult([FakeBox(self.raw_track_id)])]
+        masks = FakeMasks([self.mask_polygon]) if self.mask_polygon is not None else None
+        return [FakeResult([FakeBox(self.raw_track_id)], masks)]
 
 
 class AIDetectorTests(unittest.TestCase):
@@ -106,6 +114,20 @@ class AIDetectorTests(unittest.TestCase):
         self.assertEqual(1, after_reset[0].track_id)
         self.assertEqual(1, model.predictor.trackers[0].reset_count)
         self.assertEqual([None], model.predictor.vid_path)
+
+    def test_returns_segmentation_polygon_for_each_person(self):
+        detector = AIDetector(device="cpu")
+        model = FakeModel()
+        model.mask_polygon = [(10, 20), (30, 20), (20, 60)]
+        detector.model = model
+        detector.is_loaded = True
+
+        detection = detector.detect_people(object())[0]
+
+        self.assertEqual(
+            ((10.0, 20.0), (30.0, 20.0), (20.0, 60.0)),
+            detection.mask_polygon,
+        )
 
     def test_coreml_backend_requires_and_resolves_an_external_package(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

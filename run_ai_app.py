@@ -18,7 +18,11 @@ def parse_args():
     source.add_argument("--camera", type=int, help="Use a camera index, for example --camera 0.")
     source.add_argument("--video", type=str, help="Use a recorded video file. Playback starts when monitoring starts.")
     parser.add_argument("input_video", nargs="?", help="Optional video file, including when opening a file with the app.")
-    parser.add_argument("--model", type=str, help="Ultralytics model name/path. Defaults to yolo26n.pt.")
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="Ultralytics model name/path. Defaults to yolo26n-seg.pt.",
+    )
     parser.add_argument("--device", type=str, choices=["auto", "mps", "cpu"], help="Inference device.")
     parser.add_argument(
         "--backend",

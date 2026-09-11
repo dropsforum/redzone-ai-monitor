@@ -25,6 +25,7 @@ class TrackedDetection(NamedTuple):
     y2: int
     confidence: float
     track_id: int
+    mask_polygon: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class AIDetector:
     
     def __init__(
         self,
-        model_name: str = "yolo26n.pt",
+        model_name: str = "yolo26n-seg.pt",
         confidence_threshold: float = 0.5,
         imgsz: int = 640,
         device: str = "auto",
@@ -204,7 +205,17 @@ class AIDetector:
                         speed_totals[key] += float(speed.get(key, 0.0) or 0.0)
                     speed_samples += 1
 
-                    for box in result.boxes:
+                    raw_mask_polygons = getattr(
+                        getattr(result, "masks", None),
+                        "xy",
+                        None,
+                    )
+                    mask_polygons = (
+                        raw_mask_polygons
+                        if raw_mask_polygons is not None
+                        else ()
+                    )
+                    for box_index, box in enumerate(result.boxes):
                         class_id = int(box.cls[0])
                         if class_id != self.PERSON_CLASS_ID:
                             continue
@@ -214,10 +225,22 @@ class AIDetector:
                         confidence = float(box.conf[0])
                         raw_track_id = self._box_track_id(box)
                         session_track_id = self._session_track_id(raw_track_id, bbox)
+                        mask_polygon: tuple[tuple[float, float], ...] = ()
+                        if box_index < len(mask_polygons):
+                            try:
+                                mask_polygon = tuple(
+                                    (float(point[0]), float(point[1]))
+                                    for point in mask_polygons[box_index]
+                                )
+                            except (IndexError, TypeError, ValueError):
+                                mask_polygon = ()
+                            if len(mask_polygon) < 3:
+                                mask_polygon = ()
                         detections.append(TrackedDetection(
                             *bbox,
                             confidence,
                             session_track_id,
+                            mask_polygon,
                         ))
 
                 divisor = max(1, speed_samples)
@@ -346,7 +369,9 @@ class AIDetector:
         """
         import cv2
 
-        for x1, y1, x2, y2, conf, track_id in detections:
+        for detection in detections:
+            x1, y1, x2, y2 = detection.x1, detection.y1, detection.x2, detection.y2
+            conf, track_id = detection.confidence, detection.track_id
             # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
             

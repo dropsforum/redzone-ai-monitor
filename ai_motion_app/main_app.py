@@ -40,7 +40,7 @@ class MotionDetectionApp:
         )
         
         self.detector = AIDetector(
-            model_name=self.config.get('model_size', 'yolo26n.pt'),
+            model_name=self.config.get('model_size', 'yolo26n-seg.pt'),
             confidence_threshold=self.config.get('confidence_threshold', 0.5),
             imgsz=int(self.config.get('model_imgsz', 640)),
             device=self.config.get('model_device', 'auto'),
@@ -147,7 +147,13 @@ class MotionDetectionApp:
 
         hit_this_result = False
         max_overlap = 0.0
-        for x1, y1, x2, y2, _conf, _track_id in detections:
+        for detection in detections:
+            x1, y1, x2, y2 = (
+                detection.x1,
+                detection.y1,
+                detection.x2,
+                detection.y2,
+            )
             overlap = self.zone.bbox_zone_overlap_ratio((x1, y1, x2, y2), frame.shape[:2])
             max_overlap = max(max_overlap, overlap)
             if overlap >= min_overlap:
@@ -171,7 +177,14 @@ class MotionDetectionApp:
         min_overlap = float(self.config.get('alert_min_overlap', 0.15))
         bbox_color = self.config.get('bbox_color', (255, 0, 0))
 
-        for x1, y1, x2, y2, conf, track_id in self.last_detections:
+        for detection in self.last_detections:
+            x1, y1, x2, y2 = (
+                detection.x1,
+                detection.y1,
+                detection.x2,
+                detection.y2,
+            )
+            conf, track_id = detection.confidence, detection.track_id
             overlap = self.zone.bbox_zone_overlap_ratio((x1, y1, x2, y2), frame.shape[:2])
             if overlap >= min_overlap:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)

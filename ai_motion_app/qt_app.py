@@ -16,7 +16,16 @@ from typing import Callable, List, Optional, Tuple
 import cv2
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QFont, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QImage,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -44,7 +53,7 @@ from .breach_state import BreachDecision, BreachStateMachine, TrackObservation
 from .breach_recorder import BreachRecorder, format_duration
 from .camera_manager import CameraManager
 from .config import Config
-from .zone_entry import classify_foot_point
+from .zone_entry import ZoneContact, classify_person_zone
 
 Detection = TrackedDetection
 Point = Tuple[float, float]
@@ -81,6 +90,7 @@ class VideoPanel(QFrame):
         self.video_label = ""
         self.frame: Optional[np.ndarray] = None
         self.detections: List[Detection] = []
+        self.zone_contacts: dict[int, ZoneContact] = {}
         self.zone: List[Point] = []
         self.is_drawing = False
         self.is_monitoring = False
@@ -114,6 +124,7 @@ class VideoPanel(QFrame):
         video_label: Optional[str] = None,
         frame: Optional[np.ndarray] = None,
         detections: Optional[List[Detection]] = None,
+        zone_contacts: Optional[dict[int, ZoneContact]] = None,
         zone: Optional[List[Point]] = None,
         is_drawing: Optional[bool] = None,
         is_monitoring: Optional[bool] = None,
@@ -129,6 +140,8 @@ class VideoPanel(QFrame):
             self.frame = frame
         if detections is not None:
             self.detections = detections
+        if zone_contacts is not None:
+            self.zone_contacts = zone_contacts
         if zone is not None:
             self.zone = zone
         if is_drawing is not None:
@@ -290,15 +303,41 @@ class VideoPanel(QFrame):
         font.setPointSize(8)
         font.setBold(True)
         painter.setFont(font)
-        for x1, y1, x2, y2, conf, track_id in self.detections:
+        for detection in self.detections:
+            x1, y1, x2, y2 = (
+                detection.x1,
+                detection.y1,
+                detection.x2,
+                detection.y2,
+            )
+            conf, track_id = detection.confidence, detection.track_id
+            contact = self.zone_contacts.get(track_id)
+            if contact and contact.inside:
+                color = QColor(RED)
+            elif contact and contact.near:
+                color = QColor("#eab308")
+            else:
+                color = QColor(ACCENT)
+
+            if detection.mask_polygon:
+                mask = QPolygonF([
+                    QPointF(rect.left() + x * sx, rect.top() + y * sy)
+                    for x, y in detection.mask_polygon
+                ])
+                fill = QColor(color)
+                fill.setAlpha(62 if contact and contact.inside else 38)
+                painter.setPen(QPen(color, 2))
+                painter.setBrush(fill)
+                painter.drawPolygon(mask)
+
             box = QRectF(rect.left() + x1 * sx, rect.top() + y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy)
-            painter.setPen(QPen(QColor(RED), 2))
-            painter.setBrush(QColor(220, 38, 38, 32))
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(box)
             label = f"Person #{track_id} {round(conf * 100)}%"
             label_rect = QRectF(box.left(), max(rect.top(), box.top() - 24), 112, 22)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(RED))
+            painter.setBrush(color)
             painter.drawRoundedRect(label_rect, 5, 5)
             painter.setPen(QColor("white"))
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
@@ -357,7 +396,7 @@ class RedZoneQtWindow(QMainWindow):
             video_path=self.config.get("video_file_path", ""),
         )
         self.detector = AIDetector(
-            model_name=model_name or self.config.get("model_size", "yolo26n.pt"),
+            model_name=model_name or self.config.get("model_size", "yolo26n-seg.pt"),
             confidence_threshold=(
                 confidence_threshold
                 if confidence_threshold is not None
@@ -377,6 +416,7 @@ class RedZoneQtWindow(QMainWindow):
         self.detect_future: Optional[Future] = None
         self.current_frame: Optional[np.ndarray] = None
         self.detections: List[Detection] = []
+        self.zone_contacts: dict[int, ZoneContact] = {}
         self.zone: List[Point] = []
         self.source_mode = "camera"
         self.video_path: Optional[Path] = None
@@ -757,6 +797,7 @@ class RedZoneQtWindow(QMainWindow):
                 self.last_discontinuity_serial = self.camera.discontinuity_serial
                 self.current_frame = None
                 self.detections = []
+                self.zone_contacts.clear()
                 self.traffic = "green"
 
     def _set_source_mode(self, mode: str):
@@ -819,6 +860,7 @@ class RedZoneQtWindow(QMainWindow):
             self.detector.reset_tracker()
             self.breach_state_machine = self._make_breach_state_machine()
             self.detections = []
+            self.zone_contacts.clear()
             self.traffic = "green"
             self.dropped_inference_requests = 0
             self.last_heartbeat_at = now
@@ -850,6 +892,7 @@ class RedZoneQtWindow(QMainWindow):
             self.camera.pause_playback()
         self.zone = []
         self.detections = []
+        self.zone_contacts.clear()
         self.traffic = "green"
         self.config.zone_points = []
         self.config.save()
@@ -866,6 +909,7 @@ class RedZoneQtWindow(QMainWindow):
     def _reset_runtime(self):
         self._stop_monitoring()
         self.detections = []
+        self.zone_contacts.clear()
         self.traffic = "green"
         self.fps = 0
         self.frame_count = 0
@@ -887,6 +931,7 @@ class RedZoneQtWindow(QMainWindow):
         if self.source_mode == "file":
             self.camera.pause_playback()
         self.detections = []
+        self.zone_contacts.clear()
         self.traffic = "green"
 
     def _reset_tracking_state(self):
@@ -899,6 +944,7 @@ class RedZoneQtWindow(QMainWindow):
             self.detect_future.cancel()
             self.detect_future = None
         self.detections = []
+        self.zone_contacts.clear()
         self.traffic = "green"
 
     def _session_metadata(self) -> dict:
@@ -909,7 +955,16 @@ class RedZoneQtWindow(QMainWindow):
             "detector_backend": self.detector.backend_name,
             "zone": self.zone,
             "settings": {
-                "zone_entry_mode": self.config.get("zone_entry_mode", "footpoint"),
+                "zone_entry_mode": self.config.get("zone_entry_mode", "silhouette"),
+                "mask_overlap_threshold": float(
+                    self.config.get("mask_overlap_threshold", 0.02)
+                ),
+                "mask_contact_tolerance": float(
+                    self.config.get("mask_contact_tolerance", 0.01)
+                ),
+                "bottom_clip_ratio": float(
+                    self.config.get("bottom_clip_ratio", 0.98)
+                ),
                 "entry_confirm_ms": int(self.config.get("entry_confirm_ms", 300)),
                 "exit_grace_ms": int(self.config.get("exit_grace_ms", 750)),
                 "tracker_max_gap_ms": int(self.config.get("tracker_max_gap_ms", 750)),
@@ -1076,6 +1131,7 @@ class RedZoneQtWindow(QMainWindow):
             video_label=self.video_path.name if self.video_path else "",
             frame=self.current_frame,
             detections=self.detections,
+            zone_contacts=self.zone_contacts,
             zone=self.zone,
             is_drawing=self.is_drawing,
             is_monitoring=self.is_monitoring,
@@ -1091,6 +1147,7 @@ class RedZoneQtWindow(QMainWindow):
         now = time.monotonic()
         if not self.is_monitoring or not self.detector.is_loaded or len(self.zone) < 3:
             self.detections = []
+            self.zone_contacts.clear()
             self.traffic = "green"
             return
         if self.detect_future is not None and self.detect_future.done():
@@ -1109,8 +1166,9 @@ class RedZoneQtWindow(QMainWindow):
     def _evaluate_alerts(self, frame: np.ndarray):
         h, w = frame.shape[:2]
         observations: list[TrackObservation] = []
+        contacts: dict[int, ZoneContact] = {}
         for detection in self.detections:
-            contact = classify_foot_point(
+            contact = classify_person_zone(
                 detection.x1,
                 detection.x2,
                 detection.y2,
@@ -1118,13 +1176,19 @@ class RedZoneQtWindow(QMainWindow):
                 w,
                 h,
                 self.warning_buffer,
+                detection.mask_polygon,
+                float(self.config.get("mask_overlap_threshold", 0.02)),
+                float(self.config.get("bottom_clip_ratio", 0.98)),
+                float(self.config.get("mask_contact_tolerance", 0.01)),
             )
+            contacts[detection.track_id] = contact
             observations.append(TrackObservation(
                 track_id=detection.track_id,
                 inside=contact.inside,
                 near=contact.near,
                 confidence=detection.confidence,
             ))
+        self.zone_contacts = contacts
 
         now = time.time()
         decision = self.breach_state_machine.update(observations, now)
@@ -1204,8 +1268,29 @@ class RedZoneQtWindow(QMainWindow):
             cv2.fillPoly(overlay, [pts.reshape((-1, 1, 2))], (38, 38, 220))
             frame = cv2.addWeighted(overlay, 0.3, frame, 0.7, 0)
             cv2.polylines(frame, [pts.reshape((-1, 1, 2))], True, (38, 38, 220), 4)
-        for x1, y1, x2, y2, conf, track_id in self.detections:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (154, 121, 85), 3)
+        for detection in self.detections:
+            x1, y1, x2, y2 = (
+                detection.x1,
+                detection.y1,
+                detection.x2,
+                detection.y2,
+            )
+            conf, track_id = detection.confidence, detection.track_id
+            contact = self.zone_contacts.get(track_id)
+            color = (
+                (38, 38, 220)
+                if contact and contact.inside
+                else (8, 179, 234)
+                if contact and contact.near
+                else (154, 121, 85)
+            )
+            if detection.mask_polygon:
+                mask = np.array(detection.mask_polygon, np.int32).reshape((-1, 1, 2))
+                overlay = frame.copy()
+                cv2.fillPoly(overlay, [mask], color)
+                frame = cv2.addWeighted(overlay, 0.22, frame, 0.78, 0)
+                cv2.polylines(frame, [mask], True, color, 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             label = f"PERSON #{track_id} {round(conf * 100)}%"
             cv2.putText(frame, label, (x1 + 5, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         cv2.putText(frame, "powered by dropsforum.org", (w // 4, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (154, 121, 85), 2)
