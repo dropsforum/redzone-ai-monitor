@@ -10,19 +10,10 @@ block_cipher = None
 # When running spec, __file__ may not be defined; use CWD as project root
 project_root = os.path.abspath(os.getcwd())
 
-# Hidden imports for dynamic packages
-hiddenimports = []
-for pkg in [
-    "ultralytics",
-    "torch",
-    "torchvision",
-    "pygame",
-    "PIL",
-]:
-    try:
-        hiddenimports.extend(collect_submodules(pkg))
-    except Exception:
-        pass
+# Ultralytics loads task modules dynamically. Torch, torchvision, pygame and
+# Pillow are covered by their PyInstaller hooks; collecting every submodule
+# would also bundle their test suites and considerably slow Mac packaging.
+hiddenimports = collect_submodules("ultralytics")
 
 # Data files these libs need at runtime
 datas = []
