@@ -8,7 +8,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { CameraOff, UploadCloud, Video } from 'lucide-react';
+import { CameraOff, LoaderCircle, RefreshCcw, UploadCloud, Video } from 'lucide-react';
+import { requestCameraStream } from '../lib/camera-stream';
 
 export type VideoSourceMode = 'camera' | 'file';
 
@@ -31,6 +32,7 @@ interface VideoFrameSourceProps {
   frameIntervalMs?: number;
   onVideoFileDrop?: (file: File) => void;
   onTimelineReset?: (reason: 'seek' | 'loop') => void;
+  onReadyChange?: (ready: boolean) => void;
 }
 
 export interface VideoFrameSourceHandle {
@@ -84,17 +86,22 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
   frameIntervalMs = 100,
   onVideoFileDrop,
   onTimelineReset,
+  onReadyChange,
 }, ref) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const readyChangeRef = useRef(onReadyChange);
   const lastFrameTimeRef = useRef(0);
   const lastPlaybackTimeRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [cameraAttempt, setCameraAttempt] = useState(0);
   const [isDraggingVideo, setIsDraggingVideo] = useState(false);
   const [frameRect, setFrameRect] = useState<VideoFrameRect>({ left: 0, top: 0, width: 0, height: 0 });
+
+  useEffect(() => { readyChangeRef.current = onReadyChange; }, [onReadyChange]);
 
   useImperativeHandle(ref, () => ({
     getCanvas: () => canvasRef.current,
@@ -111,6 +118,7 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
   const updateFrameRect = useCallback(() => {
@@ -140,11 +148,23 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    let ownedStream: MediaStream | null = null;
+    let frameTimeout: ReturnType<typeof setTimeout> | undefined;
+    const video = videoRef.current;
+    const handleCameraEnded = () => {
+      if (controller.signal.aborted) return;
+      setIsReady(false);
+      readyChangeRef.current?.(false);
+      setError('Camera Disconnected');
+    };
+    const clearFrameTimeout = () => clearTimeout(frameTimeout);
+    video?.addEventListener('loadeddata', clearFrameTimeout);
 
     async function setupWebcam() {
       setError(null);
       setIsReady(false);
+      readyChangeRef.current?.(false);
 
       if (!navigator.mediaDevices?.getUserMedia) {
         setError('Browser Not Supported');
@@ -153,6 +173,9 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
 
       try {
         stopStream();
+        video?.pause();
+        video?.removeAttribute('src');
+        video?.load();
 
         const constraints: MediaStreamConstraints = {
           video: {
@@ -164,27 +187,43 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
         };
 
         try {
-          streamRef.current = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch (e) {
-          console.warn('Retrying webcam with basic constraints...', e);
-          streamRef.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          ownedStream = await requestCameraStream(constraints, controller.signal);
+        } catch (error) {
+          const name = error instanceof DOMException ? error.name : '';
+          if (controller.signal.aborted || !['NotFoundError', 'OverconstrainedError'].includes(name)) throw error;
+          ownedStream = await requestCameraStream({ video: true, audio: false }, controller.signal);
         }
 
-        if (cancelled) {
-          stopStream();
+        if (controller.signal.aborted) {
+          ownedStream.getTracks().forEach(track => track.stop());
           return;
         }
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = streamRef.current;
-          await videoRef.current.play().catch(() => undefined);
+        streamRef.current = ownedStream;
+        ownedStream.getTracks().forEach(track => track.addEventListener('ended', handleCameraEnded));
+        if (video) {
+          video.removeAttribute('src');
+          video.srcObject = ownedStream;
+          frameTimeout = setTimeout(() => {
+            if (controller.signal.aborted || video.readyState >= video.HAVE_CURRENT_DATA) return;
+            stopStream();
+            setIsReady(false);
+            readyChangeRef.current?.(false);
+            setError('Camera Not Responding');
+          }, 12_000);
+          await video.play();
         }
       } catch (err: unknown) {
+        if (controller.signal.aborted) return;
+        stopStream();
+        setIsReady(false);
+        readyChangeRef.current?.(false);
         console.error('Critical error accessing webcam:', err);
         const name = err instanceof DOMException ? err.name : '';
         if (name === 'NotAllowedError') setError('Permission Denied');
         else if (name === 'NotFoundError') setError('Camera Not Found');
         else if (name === 'NotReadableError') setError('Camera In Use');
+        else if (name === 'TimeoutError') setError('Camera Not Responding');
         else setError('Connection Error');
       }
     }
@@ -192,10 +231,19 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
     setupWebcam();
 
     return () => {
-      cancelled = true;
-      stopStream();
+      controller.abort();
+      clearFrameTimeout();
+      video?.removeEventListener('loadeddata', clearFrameTimeout);
+      ownedStream?.getTracks().forEach(track => {
+        track.removeEventListener('ended', handleCameraEnded);
+        track.stop();
+      });
+      if (streamRef.current === ownedStream) {
+        streamRef.current = null;
+        if (video?.srcObject === ownedStream) video.srcObject = null;
+      }
     };
-  }, [deviceId, height, sourceMode, stopStream, width]);
+  }, [cameraAttempt, deviceId, height, sourceMode, stopStream, width]);
 
   useEffect(() => {
     if (sourceMode !== 'file') return;
@@ -203,6 +251,7 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
     stopStream();
     setError(null);
     setIsReady(false);
+    readyChangeRef.current?.(false);
 
     const video = videoRef.current;
     if (!video) return;
@@ -288,11 +337,14 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
   }, [frameIntervalMs, onFrame, onTimelineReset, sourceMode]);
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) {
-      videoRef.current.defaultPlaybackRate = 1;
-      videoRef.current.playbackRate = 1;
-    }
+    const video = videoRef.current;
+    if (!video) return;
+    if (sourceMode === 'camera' && (!streamRef.current || video.srcObject !== streamRef.current)) return;
+    if (sourceMode === 'file' && (!videoUrl || video.getAttribute('src') !== videoUrl)) return;
+    video.defaultPlaybackRate = 1;
+    video.playbackRate = 1;
     setIsReady(true);
+    readyChangeRef.current?.(true);
     updateFrameRect();
   };
 
@@ -342,8 +394,14 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {error ? (
-        <div className="flex flex-col items-center gap-4 p-8 text-center animate-in fade-in zoom-in duration-500">
+      {sourceMode === 'camera' && !isReady && !error && (
+        <div role="status" className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-slate-50 text-[#55799a] text-xs font-bold">
+          <LoaderCircle className="h-5 w-5 animate-spin" />
+          Connecting Camera
+        </div>
+      )}
+      {error && (
+        <div role="alert" className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-50 p-8 text-center">
           <div className="p-5 bg-red-50 rounded-full text-red-500 border border-red-100">
             <CameraOff size={40} strokeWidth={1.5} />
           </div>
@@ -354,20 +412,22 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
                 ? 'Check browser settings and click Allow for camera access.'
                 : error === 'Browser Not Supported'
                   ? 'Camera access requires localhost or HTTPS connection.'
-                  : error === 'Camera In Use'
+                  : error === 'Camera Not Responding'
+                    ? 'Camera startup timed out. Retry or select another camera.'
+                    : error === 'Camera In Use'
                     ? 'Close other applications using the camera.'
                     : 'Could not detect a working camera or video source.'}
             </p>
           </div>
           <button
-            onClick={() => window.location.reload()}
-            className="mt-2 px-6 py-2 bg-slate-100 text-slate-600 text-[10px] font-black rounded-lg hover:bg-slate-200 active:scale-95 transition-all uppercase tracking-widest border border-slate-200 shadow-sm"
+            onClick={() => setCameraAttempt(attempt => attempt + 1)}
+            className="mt-2 flex items-center gap-2 px-6 py-2 bg-slate-100 text-slate-600 text-[10px] font-black rounded-lg hover:bg-slate-200 active:scale-95 transition-all uppercase tracking-widest border border-slate-200 shadow-sm"
           >
-            Reconnect System
+            <RefreshCcw className="h-3.5 w-3.5" />
+            Retry Camera
           </button>
         </div>
-      ) : (
-        <>
+      )}
           {sourceMode === 'file' && (!videoUrl || isDraggingVideo) && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 p-8 text-center">
               <div className="p-5 bg-white rounded-full text-[#55799a] border border-slate-100 shadow-sm">
@@ -388,7 +448,8 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
             loop={sourceMode === 'file'}
             playsInline
             muted={sourceMode === 'camera'}
-            onLoadedMetadata={handleLoadedMetadata}
+            onLoadedMetadata={updateFrameRect}
+            onLoadedData={handleLoadedMetadata}
             onSeeking={() => {
               if (sourceMode === 'file') {
                 lastPlaybackTimeRef.current = videoRef.current?.currentTime ?? 0;
@@ -418,8 +479,6 @@ const VideoFrameSource = forwardRef<VideoFrameSourceHandle, VideoFrameSourceProp
               )}
             </div>
           )}
-        </>
-      )}
     </div>
   );
 });

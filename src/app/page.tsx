@@ -97,6 +97,7 @@ function HomeContent() {
   const [inferenceLatencyMs, setInferenceLatencyMs] = useState(0);
   const [activeBackend, setActiveBackend] = useState('onnx-wasm');
   const [sourceMode, setSourceMode] = useState<VideoSourceMode>('camera');
+  const [isVideoReady, setIsVideoReady] = useState(false);
   
   // Data State
   const [detections, setDetections] = useState<TrackedDetection[]>([]);
@@ -401,29 +402,19 @@ function HomeContent() {
   }, [dimensions, zone, detections]);
 
   // Enumerate cameras
-  const getDevices = useCallback(async (requestPermission = false) => {
+  const getDevices = useCallback(async () => {
     try {
       if (!navigator.mediaDevices) return;
 
-      if (requestPermission) {
-        // Explicitly request permission to trigger browser device discovery
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        stream.getTracks().forEach(track => track.stop());
-      }
-      
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       
       console.log('[CAMERA] Found devices:', videoDevices.map(d => d.label || 'Unnamed Device'));
       setAvailableDevices(videoDevices);
-      
-      if (videoDevices.length > 0 && !selectedDeviceId) {
-        setSelectedDeviceId(videoDevices[0].deviceId);
-      }
     } catch (err) {
       console.error("Error enumerating devices:", err);
     }
-  }, [selectedDeviceId]);
+  }, []);
 
   useEffect(() => {
     if (!navigator.mediaDevices) return;
@@ -550,11 +541,21 @@ function HomeContent() {
   const stopMonitoring = useCallback(async () => {
     const nowMs = Date.now();
     setIsMonitoring(false);
+    setDetections([]);
+    setTrafficLightState('green');
+    setFps(0);
+    setInferenceLatencyMs(0);
+    fpsRef.current = 0;
     if (sourceMode === 'file') videoSourceRef.current?.pause();
     await completeMonitoringSession(nowMs).catch(error => {
       console.error('[SESSION] Final save failed:', error);
     });
   }, [completeMonitoringSession, sourceMode]);
+
+  const handleVideoReadyChange = useCallback((ready: boolean) => {
+    setIsVideoReady(ready);
+    if (!ready && isMonitoring) void stopMonitoring();
+  }, [isMonitoring, stopMonitoring]);
 
   const handleTimelineReset = useCallback(() => {
     if (!isMonitoring) return;
@@ -680,7 +681,7 @@ function HomeContent() {
     width: frameRect.width || '100%',
     height: frameRect.height || '100%',
   };
-  const hasActiveVideoSource = hasVideoSource(sourceMode, videoUrl, dimensions);
+  const hasActiveVideoSource = isVideoReady && hasVideoSource(sourceMode, videoUrl, dimensions);
 
   return (
     <main className={`bg-white text-slate-800 flex flex-col p-4 md:p-6 font-sans mx-auto ${isEmbedMode ? 'max-w-none w-full' : 'max-w-[700px]'}`}>
@@ -770,6 +771,7 @@ function HomeContent() {
               frameIntervalMs={isMobileMode ? 333 : 100}
               onVideoFileDrop={loadRecordedVideo}
               onTimelineReset={handleTimelineReset}
+              onReadyChange={handleVideoReadyChange}
             />
 
             {hasActiveVideoSource && (
@@ -859,7 +861,7 @@ function HomeContent() {
               }`}
             >
               <Edit3 className="w-4 h-4" />
-              <span className="uppercase text-[10px] tracking-widest">{isDrawing ? 'Save Zone' : 'Draw Zone'}</span>
+              <span className="uppercase text-[10px] tracking-widest">{isDrawing ? 'Save Zone' : zone.length ? 'Edit Zone' : 'Draw Zone'}</span>
             </button>
             
             <button
@@ -1233,7 +1235,7 @@ function HomeContent() {
                   <Settings className="w-3 h-3 text-[#55799a]" /> Active Camera
                 </span>
                 <button 
-                  onClick={() => getDevices(true)}
+                  onClick={() => getDevices()}
                   className="text-[#55799a] hover:bg-slate-50 p-1 rounded-md transition-all border border-transparent hover:border-slate-100"
                   title="Refresh Hardware"
                 >
@@ -1249,6 +1251,7 @@ function HomeContent() {
                 }}
                 className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-[10px] font-mono text-slate-600 outline-none focus:ring-1 focus:ring-[#55799a] transition-all cursor-pointer"
               >
+                <option value="">Default Camera</option>
                 {availableDevices.length === 0 ? (
                   <option value="">Searching...</option>
                 ) : (
