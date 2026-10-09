@@ -28,6 +28,9 @@ a = Analysis(
     ],
     noarchive=False,
 )
+# Standard dependency hooks may collect their own test fixtures. They are not
+# application resources and must not enter the downloadable payload.
+a.datas = [entry for entry in a.datas if "tests" not in Path(entry[0]).parts]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True,

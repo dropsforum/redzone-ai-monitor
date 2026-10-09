@@ -252,13 +252,18 @@ class WindowsPackagingTests(unittest.TestCase):
 
         def analysis(*args, **kwargs):
             analyses.append(kwargs)
-            return types.SimpleNamespace(pure=[], scripts=[], binaries=[], datas=[])
+            return types.SimpleNamespace(pure=[], scripts=[], binaries=[], datas=[
+                ("torch/fx/passes/tests/fixture.txt", "fixture.txt", "DATA"),
+                ("torch/config/runtime.json", "runtime.json", "DATA"),
+            ])
 
         with patch.dict("sys.modules", {"PyInstaller.utils.hooks": hook_module}):
             runpy.run_path(str(WINDOWS / "pyinstaller.spec"), init_globals={
                 "SPECPATH": str(WINDOWS), "Analysis": analysis,
                 "PYZ": lambda *args: None, "EXE": lambda *args, **kwargs: None,
-                "COLLECT": lambda *args, **kwargs: None,
+                "COLLECT": lambda *args, **kwargs: self.assertEqual(args[2], [
+                    ("torch/config/runtime.json", "runtime.json", "DATA")
+                ]),
             })
         self.assertEqual(calls, ["ultralytics"])
         self.assertEqual(analyses[0]["datas"], [])
