@@ -689,17 +689,14 @@ function HomeContent() {
       {!isEmbedMode && (
         <div className="flex flex-col gap-2 mb-6 border-b border-slate-100 pb-4">
           <div className="flex justify-between items-center">
-            <h1 className="text-xl font-black tracking-tighter text-[#55799a] uppercase italic text-center md:text-left">
-              DROPS FORUM RED ZONE MONITOR POC
+            <h1 className="text-xl font-black text-[#55799a] uppercase italic text-center md:text-left">
+              Exposure Zone Monitoring
             </h1>
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
               <Cpu className="w-3 h-3 text-[#55799a]" />
               <span className="text-[10px] font-bold uppercase text-slate-600">{isModelLoaded ? 'AI Ready' : modelError ? 'Model Missing' : 'Loading...'}</span>
             </div>
           </div>
-          <p className="text-slate-400 text-[10px] font-mono flex items-center gap-2 uppercase tracking-widest">
-            <Zap className="w-3 h-3 text-[#55799a]" /> POWERED BY YOLO26 AI • BROWSER-NATIVE
-          </p>
         </div>
       )}
 

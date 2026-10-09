@@ -1,3 +1,4 @@
 APP_VERSION = "1.2.0-rc.1"
+APP_NAME = "Exposure Zone Monitoring"
 MAC_BUNDLE_VERSION = "1.2.0"
 MAC_BUILD_NUMBER = "12001"

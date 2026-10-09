@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-APP_NAME="DROPS Red Zone Monitoring"
+APP_NAME="Exposure Zone Monitoring"
 APP_PATH="dist/${APP_NAME}.app"
 SIGNED_APP_DIR="${SIGNED_APP_DIR:-/tmp/redzone-mac-sign}"
 SIGNED_APP_PATH="${SIGNED_APP_PATH:-${SIGNED_APP_DIR}/${APP_NAME}.app}"

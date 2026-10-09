@@ -28,6 +28,7 @@ self_test = load_module("verify_self_test")
 class WindowsPackagingTests(unittest.TestCase):
     def success_report(self):
         return {
+            "product": "Exposure Zone Monitoring",
             "success": True, "version": "1.2.0-rc.1", "platform": "Windows",
             "model": "yolo26n-seg.pt", "ultralytics": "8.4.146", "backend": "pytorch/cpu",
             "checks": [
@@ -42,7 +43,7 @@ class WindowsPackagingTests(unittest.TestCase):
     def make_app(self, root):
         app = Path(root) / build.APP_NAME
         app.mkdir()
-        (app / f"{build.APP_NAME}.exe").write_bytes(b"test-executable")
+        (app / build.EXE_NAME).write_bytes(b"test-executable")
         (app / "_internal").mkdir()
         (app / "_internal/runtime.dll").write_bytes(b"test-dll")
         return app
@@ -55,7 +56,7 @@ class WindowsPackagingTests(unittest.TestCase):
             build.archive(app, output)
             with zipfile.ZipFile(output) as bundle:
                 self.assertEqual(set(bundle.namelist()), {
-                    f"{build.APP_NAME}/{build.APP_NAME}.exe",
+                    f"{build.APP_NAME}/{build.EXE_NAME}",
                     f"{build.APP_NAME}/_internal/runtime.dll",
                 })
             expected = hashlib.sha256(output.read_bytes()).hexdigest()
@@ -112,6 +113,27 @@ class WindowsPackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(RuntimeError, "Missing frozen executable"):
                 build.validate_payload(directory)
+
+    def test_windows_product_names_and_legacy_cache_documentation(self):
+        self.assertEqual(build.APP_NAME, "Exposure Zone Monitoring")
+        self.assertEqual(build.EXE_NAME, "ExposureZoneMonitoring.exe")
+        self.assertEqual(build.ZIP.name, "Exposure-Zone-Monitoring-Windows-x64.zip")
+        self.assertEqual(self_test.EXE, build.APP / build.EXE_NAME)
+        readme = (WINDOWS / "README.md").read_text()
+        self.assertIn("# Exposure Zone Monitoring - Windows x64 Preview", readme)
+        self.assertIn("Exposure Zone Monitoring/ExposureZoneMonitoring.exe", readme)
+        self.assertIn("%LOCALAPPDATA%\\DROPS Red Zone Monitoring\\models", readme)
+        self.assertIn("%LOCALAPPDATA%\\DROPS Red Zone Monitoring\\monitoring.sqlite3", readme)
+        self.assertNotIn("DROPS Red Zone Monitoring.exe", readme)
+        self.assertNotIn("DROPS-Red-Zone-Monitoring-Windows", readme)
+        version = (WINDOWS / "version_info.txt").read_text()
+        for field, value in {
+            "FileDescription": "Exposure Zone Monitoring Preview",
+            "ProductName": "Exposure Zone Monitoring",
+            "InternalName": "ExposureZoneMonitoring",
+            "OriginalFilename": "ExposureZoneMonitoring.exe",
+        }.items():
+            self.assertIn(f"StringStruct('{field}', '{value}')", version)
 
     def test_documents_include_selected_notices_python_and_wheel_licenses(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -191,6 +213,7 @@ class WindowsPackagingTests(unittest.TestCase):
 
     def test_self_test_rejects_wrong_or_missing_identity_and_field_types(self):
         wrong_values = {
+            "product": "DROPS Red Zone Monitoring",
             "version": "1.2.0", "platform": "Darwin", "model": "yolo26n.pt",
             "ultralytics": "8.4.68", "backend": "pytorch/mps", "success": False,
         }
@@ -249,25 +272,35 @@ class WindowsPackagingTests(unittest.TestCase):
         hook_module.collect_submodules = collect_submodules
         hook_module.collect_data_files = lambda *args, **kwargs: []
         analyses = []
+        executables = []
+        collections = []
 
         def analysis(*args, **kwargs):
             analyses.append(kwargs)
             return types.SimpleNamespace(pure=[], scripts=[], binaries=[], datas=[
                 ("torch/fx/passes/tests/fixture.txt", "fixture.txt", "DATA"),
+                ("torch/fx/passes/tests/nested/fixture.txt", "nested.txt", "DATA"),
                 ("torch/config/runtime.json", "runtime.json", "DATA"),
             ])
+
+        def executable(*args, **kwargs):
+            executables.append(kwargs)
+
+        def collect(*args, **kwargs):
+            collections.append(kwargs)
+            self.assertEqual(args[2], [("torch/config/runtime.json", "runtime.json", "DATA")])
 
         with patch.dict("sys.modules", {"PyInstaller.utils.hooks": hook_module}):
             runpy.run_path(str(WINDOWS / "pyinstaller.spec"), init_globals={
                 "SPECPATH": str(WINDOWS), "Analysis": analysis,
-                "PYZ": lambda *args: None, "EXE": lambda *args, **kwargs: None,
-                "COLLECT": lambda *args, **kwargs: self.assertEqual(args[2], [
-                    ("torch/config/runtime.json", "runtime.json", "DATA")
-                ]),
+                "PYZ": lambda *args: None, "EXE": executable,
+                "COLLECT": collect,
             })
         self.assertEqual(calls, ["ultralytics"])
         self.assertEqual(analyses[0]["datas"], [])
         self.assertEqual(analyses[0]["runtime_hooks"], [str(WINDOWS / "runtime_hook.py")])
+        self.assertEqual(executables[0]["name"] + ".exe", build.EXE_NAME)
+        self.assertEqual(collections[0]["name"], build.APP_NAME)
 
     def test_runtime_hook_preserves_cwd_without_mac_loader(self):
         import os
@@ -281,6 +314,7 @@ class WindowsPackagingTests(unittest.TestCase):
         # BaseLoader avoids YAML 1.1 treating GitHub's `on` key as a boolean.
         import yaml
         workflow = yaml.load((ROOT / ".github/workflows/desktop-windows.yml").read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(workflow["name"], "Exposure Zone Monitoring - Windows x64 Preview")
         self.assertEqual(set(workflow["on"]), {"push", "workflow_dispatch"})
         self.assertEqual(workflow["on"]["push"]["branches"], ["codex/native-desktop-release"])
         self.assertEqual(workflow["permissions"], {"contents": "read"})
@@ -295,6 +329,13 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertNotIn("gh release", commands)
         steps = [step.get("name") for step in job["steps"]]
         self.assertLess(steps.index("Verify frozen self-test"), steps.index("Archive verified payload and SHA256"))
+        upload = next(step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v4")
+        self.assertEqual(upload["with"]["name"], "Exposure-Zone-Monitoring-Windows-x64-1.2rc1")
+        self.assertEqual(upload["with"]["path"].splitlines(), [
+            "dist/Exposure-Zone-Monitoring-Windows-x64.zip",
+            "dist/Exposure-Zone-Monitoring-Windows-x64.zip.sha256",
+            "dist/self-test.json",
+        ])
 
 
 if __name__ == "__main__":

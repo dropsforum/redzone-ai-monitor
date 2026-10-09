@@ -1,6 +1,6 @@
-# DROPS Red Zone Monitoring
+# Exposure Zone Monitoring
 
-DROPS Red Zone Monitoring is a prototype application exploring how local AI and computer vision can support Exposure Zone Management.
+Exposure Zone Monitoring is a prototype application exploring how local AI and computer vision can support Exposure Zone Management.
 
 The project is based on a simple principle: monitoring should help organizations challenge access, not merely administer it. A person entering a red zone, restricted access zone, or other line-of-fire exposure area should not be treated as normal simply because entry can be detected, alarmed, or recorded. The stronger question is whether the work could have been designed so that entry was avoided, reduced, shortened, delayed, or better controlled in the first place.
 
@@ -8,24 +8,46 @@ This app is therefore not intended to make entry into hazardous areas acceptable
 
 In the context of DROPS Exposure Zone Management, AI monitoring can support assurance by helping teams see where exposure occurs, whether access rules are being followed, and where repeated entry may indicate a deeper planning or design issue. The goal is not better permission to enter danger. The goal is better evidence to reduce the need for entry.
 
-This repository contains two DROPS Red Zone Monitoring targets:
+## Philosophy
+
+**Avoid or reduce exposure first; use AI for assurance second.** Define zones by the hazards and work conditions that expose people, not by colour alone. Redesign or resequence tasks, relocate work positions and consider tooling or remote methods before relying on permission to enter. Where entry remains necessary, make it intentional, controlled and time-limited, with clear ownership and a review of repeated exposure.
+
+This approach is discussed in DROPS Forum's published [Red Zone Management article, including the transition to Exposure Zone Management](https://www.dropsforum.org/red-zone-management#guidance). The separate [Exposure Zone Management publication](https://www.dropsforum.org/publications/exposure-zone-management) is publicly available as a **working draft for member review, not an adopted or endorsed DROPS standard**.
+
+Monitoring can help review control effectiveness and exposure patterns; it does not grant permission to enter, enforce access or automatically stop equipment. An alert is evidence for a human response, not a replacement for work design, physical controls, competent supervision or site-specific risk assessment. This prototype must never be the sole control for hazardous work.
+
+## DROPS Asia and DROPS Forum
+
+The [DROPS Asia-Pacific Chapter](https://www.dropsonline.org/about/drops-organisation/drops-asia-pacific/) brings regional experience into the wider DROPS campaign through events, communication and shared practice. DROPS Forum is the website and connected learning/services platform operated by DROPS Asia, not a separate contracting organisation; see its [official service terms](https://www.dropsforum.org/terms). Its [membership and support programme](https://www.dropsforum.org/membership) connects peer discussion, workshops, implementation guidance and practical resources. Participation is not accreditation or operational certification.
+
+### How We Can Help
+
+We can help companies develop or review Exposure Zone Management through workshops, facilitated task/zone reviews and implementation planning. Together with site teams, we can examine entry requirements, zone ownership, access rules, repeated-exposure patterns, workforce communication and a staged evaluation of monitoring tools. The starting question is how to avoid or reduce exposure, not which AI system to buy.
+
+This support concerns planning, learning and implementation review. Technical enforcement, machine interlocks or automatic stops require separately engineered and validated systems; this app does not provide them. Site owners and their competent teams remain accountable for risk assessments, controls, authorization, privacy, workforce involvement, response arrangements and acceptance of any operational system. No workshop, membership or app output is a safety approval, endorsement or guarantee.
+
+[Contact DROPS Forum through the official enquiry page](https://www.dropsforum.org/contact) to discuss your tasks, existing controls and implementation needs.
+
+## Application Targets
+
+This repository contains two Exposure Zone Monitoring targets:
 
 - **Native desktop app**: Python/PySide6/OpenCV/Ultralytics, packaged with PyInstaller for macOS 14+ on Apple Silicon arm64 (MPS inference) and Windows 10/11 x64 (CPU inference).
-- **Web app**: a Next.js browser proof of concept using YOLO26n detection with ONNX Runtime Web/WASM. Its zone geometry and foot-point checks differ from native segmentation; it does not have segmentation parity.
+- **Web app**: a Next.js browser proof of concept using local detection with ONNX Runtime Web/WASM. Its zone geometry and foot-point checks differ from native segmentation; it does not have segmentation parity. Model details are in the technical provenance section below.
 
 ## Native Preview Downloads
 
-Preview **v1.2.0-rc.1** is for demonstration and evaluation only. Use the exact release notes for package verification and limitations. These links identify the preview, not the older stable release:
+Preview **v1.2.0-rc.1** is for demonstration and evaluation only. Use the exact release below; its release notes and build manifest describe the verification performed and remaining limitations:
 
 - [Preview release and verification notes](https://github.com/dropsforum/redzone-ai-monitor/releases/tag/v1.2.0-rc.1)
-- [Mac download: DROPS-Red-Zone-Monitoring-macos-arm64.dmg](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/DROPS-Red-Zone-Monitoring-macos-arm64.dmg)
-- [Windows download: DROPS-Red-Zone-Monitoring-Windows-x64.zip](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/DROPS-Red-Zone-Monitoring-Windows-x64.zip)
+- [Mac download: Exposure-Zone-Monitoring-macos-arm64.dmg](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/Exposure-Zone-Monitoring-macos-arm64.dmg)
+- [Windows download: Exposure-Zone-Monitoring-Windows-x64.zip](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/Exposure-Zone-Monitoring-Windows-x64.zip)
 - [SHA256SUMS.txt](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/SHA256SUMS.txt)
 - [build-manifest.json](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/build-manifest.json)
 
 Use the preview tag above: GitHub's latest stable release remains the older **v1.1.0 (December 2025)** and is not this native preview. Packaged apps require no separate Python installation. Intel Macs and Windows ARM are unsupported and untested for this release; Windows hardware validation is not claimed.
 
-On Mac, open the DMG and copy the app to Applications. Developer ID signing is used when an identity is available; this preview is **not Apple-notarized**. On Windows, extract the entire ZIP before launching its app executable; keep its bundled libraries alongside it. The Windows preview is unsigned and may trigger SmartScreen. Confirm the source and checksum and follow your organization's security policy; do not disable protections.
+On Mac, open the DMG and copy **Exposure Zone Monitoring.app** to Applications. Developer ID signing is used when an identity is available; this preview is **not Apple-notarized**. On Windows, extract the entire ZIP, then launch **ExposureZoneMonitoring.exe** inside the **Exposure Zone Monitoring** folder; keep its bundled libraries alongside it. The Windows preview is unsigned and may trigger SmartScreen. Confirm the source and checksum and follow your organization's security policy; do not disable protections.
 
 Model weights are not committed or packaged. On first use, the native app downloads the selected approved model (`yolo26n-seg.pt` by default, or `yolo26n.pt` detection) from official Ultralytics `v8.4.0` assets and verifies its pinned SHA-256 before an atomic move into the user cache. Mac cache: `~/Library/Caches/redzone-ai-monitor/models`; Windows cache: `%LOCALAPPDATA%\DROPS Red Zone Monitoring\models`. Internet is needed initially; a verified cached model can subsequently run offline. See [desktop release instructions](docs/desktop-releases.md) for checksums, readiness messages, local records and the scope of verification.
 
@@ -67,7 +89,7 @@ The native app uses the same PySide6 UI on Mac and Windows, not Tauri or Electro
 
 Native model: `yolo26n-seg.pt`, with `ultralytics==8.4.146`. Mac uses PyTorch/MPS; the Windows preview uses CPU. Performance depends on the device, source and scene; no Windows hardware performance result is asserted.
 
-Maintainer verification: **58 assembled Python tests passed**, and the Mac self-test passed with actual model loading and inference on **MPS**, using Ultralytics **8.4.146**. Exact packaged-build evidence is in the release notes and build manifest. Automated checks do not establish physical-camera, Windows hardware or operational safety acceptance.
+Maintainer-reported verification: **59 assembled Python tests passed**, and the Mac self-test passed with actual model loading and inference on **MPS**, using Ultralytics **8.4.146**. Final renamed-build and public-download evidence belongs in the release notes/build manifest after verification. Automated checks do not establish physical-camera, Windows hardware or operational safety acceptance. Source branding changes do not establish that the website has been deployed to Vercel.
 
 ### Run locally
 
@@ -127,6 +149,8 @@ The app bundle includes `NSCameraUsageDescription` and the camera entitlement in
 
 Camera/file inference stays on the device. The app does not upload footage or automatically retain raw video. The initial model download is a network request, not a footage upload. Native breach and session data persist locally in `monitoring.sqlite3` under `~/Library/Application Support/DROPS Red Zone Monitoring/` on Mac or `%LOCALAPPDATA%\DROPS Red Zone Monitoring\` on Windows. Exported reports remain wherever you choose to save them.
 
+The legacy **DROPS Red Zone Monitoring** session/cache folder names and `redzone-ai-monitor` Mac model-cache path are intentionally retained for compatibility and monitoring-history continuity. The product rename does not rename or migrate these folders; do not move them simply to match the new branding. The GitHub repository also remains `dropsforum/redzone-ai-monitor`.
+
 The Excel workbook contains **Records**, **Person Breaches**, **Aggregated Results**, **Overall Metrics** and **Session Metadata**. Local records and exports may still be sensitive worker-monitoring data: agree camera permissions, access, retention, consent/legal basis and deletion procedures before site evaluation. Local processing alone does not establish privacy compliance.
 
 ## Intended Use
@@ -137,9 +161,9 @@ It should not be used as the only control for hazardous work. Any operational us
 
 ## 📦 Features
 
-- **Real-time AI Detection**: Runs YOLO26 directly in your browser using ONNX Runtime Web.
+- **Local Detection**: Analyzes camera or recorded-video frames locally, with technical runtime details below.
 - **Recorded Video Mode**: Analyze a local recorded video file in the browser without uploading it.
-- **Native Desktop Path**: Runs YOLO26n segmentation through Python/PySide6/OpenCV, with local session records and Excel export on Mac and Windows.
+- **Native Desktop Path**: Segmentation-based zone contact through Python/PySide6/OpenCV, with local session records and Excel export on Mac and Windows.
 - **Custom Zones**: Draw and edit monitoring zones directly on the live camera feed.
 - **Visual Alerts**: On-screen indicators and sound alerts when someone enters a "Red Zone".
 - **Local Processing**: No footage upload or automatic raw-footage retention; native breach/session records are stored locally. Initial native model setup requires internet.
@@ -194,7 +218,7 @@ outputs, or private footage in tracked repository paths.
 
 ## Licensing
 
-The repository is AGPL-3.0-or-later, as stated in [LICENSE](LICENSE). The public evaluation preview is distributed on that open-source basis, with corresponding application/build source at the [exact v1.2.0-rc.1 tag](https://github.com/dropsforum/redzone-ai-monitor/tree/v1.2.0-rc.1), upstream licence/source references and [Qt replacement/rebuild instructions](docs/desktop-releases.md#replacing-qt-libraries-and-rebuilding). Source-tag availability follows publication status above.
+The repository is AGPL-3.0-or-later, as stated in [LICENSE](LICENSE). The public evaluation preview uses that open-source basis. Corresponding application/build source is referenced by the [exact v1.2.0-rc.1 tag](https://github.com/dropsforum/redzone-ai-monitor/tree/v1.2.0-rc.1), with upstream licence/source references and [Qt replacement/rebuild instructions](docs/desktop-releases.md#replacing-qt-libraries-and-rebuilding).
 
 Ultralytics code and models have AGPL-3.0 and commercial licensing options; downloading weights separately does not remove their obligations. Licensing suitability for **production or operational deployment** remains an external decision for the intended use, separate from this requested public AGPL preview. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Neither this documentation nor the preview is a blanket compliance certificate, unrestricted commercial-use permission or a statement that every enterprise use requires a paid licence.
 
@@ -205,4 +229,4 @@ For instructions on integrating this module into the `dropsforum.org` website, s
 For native installation and release verification, see [docs/desktop-releases.md](docs/desktop-releases.md); preview changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ---
-*DROPS FORUM Red Zone Monitoring POC*
+*Exposure Zone Monitoring - a DROPS Forum evaluation prototype*

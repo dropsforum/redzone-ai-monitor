@@ -6,11 +6,11 @@ VSVersionInfo(
     kids=[
         StringFileInfo([StringTable('040904B0', [
             StringStruct('CompanyName', 'DROPS'),
-            StringStruct('FileDescription', 'DROPS Red Zone Monitoring Preview'),
+            StringStruct('FileDescription', 'Exposure Zone Monitoring Preview'),
             StringStruct('FileVersion', '1.2.0-rc.1'),
-            StringStruct('InternalName', 'DROPS Red Zone Monitoring'),
-            StringStruct('OriginalFilename', 'DROPS Red Zone Monitoring.exe'),
-            StringStruct('ProductName', 'DROPS Red Zone Monitoring'),
+            StringStruct('InternalName', 'ExposureZoneMonitoring'),
+            StringStruct('OriginalFilename', 'ExposureZoneMonitoring.exe'),
+            StringStruct('ProductName', 'Exposure Zone Monitoring'),
             StringStruct('ProductVersion', '1.2.0-rc.1'),
         ])]),
         VarFileInfo([VarStruct('Translation', [1033, 1200])]),

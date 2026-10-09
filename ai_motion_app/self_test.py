@@ -12,13 +12,13 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
-from .version import APP_VERSION
+from .version import APP_NAME, APP_VERSION
 
 
 def run_self_test(output_path: Path, device: str = "auto") -> int:
     output_path = output_path.expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    report = {"version": APP_VERSION, "platform": platform.system(), "success": False, "checks": []}
+    report = {"product": APP_NAME, "version": APP_VERSION, "platform": platform.system(), "success": False, "checks": []}
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     try:
         import cv2

@@ -34,11 +34,11 @@ a.datas = [entry for entry in a.datas if "tests" not in Path(entry[0]).parts]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True,
-    name="DROPS Red Zone Monitoring", console=False,
+    name="ExposureZoneMonitoring", console=False,
     disable_windowed_traceback=False, strip=False, upx=False,
     version=str(project_root / "packaging/windows/version_info.txt"),
 )
 coll = COLLECT(
     exe, a.binaries, a.datas, strip=False, upx=False,
-    name="DROPS Red Zone Monitoring",
+    name="Exposure Zone Monitoring",
 )

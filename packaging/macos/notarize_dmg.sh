@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-DMG="${1:-DROPS-Red-Zone-Monitoring-macos-arm64.dmg}"
+DMG="${1:-Exposure-Zone-Monitoring-macos-arm64.dmg}"
 PROFILE="${APPLE_NOTARY_PROFILE:-}"
 
 [[ -f "$DMG" ]] || { echo "DMG not found: $DMG"; exit 1; }

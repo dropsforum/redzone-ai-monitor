@@ -1,10 +1,12 @@
-# Third-Party Notices and Release Licensing Review
+# Exposure Zone Monitoring - Third-Party Notices
 
 ## Project Licence
 
 The repository's [LICENSE](LICENSE) identifies **AGPL-3.0-or-later**. The [GNU AGPL text](https://www.gnu.org/licenses/agpl-3.0.html) governs the source licence. Dependency and model terms remain separate. This document is an upstream-reference inventory and release-review checklist, not a complete copy of every bundled copyright/licence notice or a legal compliance certification.
 
-The requested public **v1.2.0-rc.1 AGPL evaluation preview** distributes corresponding application/build source at the [exact release tag](https://github.com/dropsforum/redzone-ai-monitor/tree/v1.2.0-rc.1), together with upstream licence/source references and the [Qt replacement/rebuild/re-sign route](docs/desktop-releases.md#replacing-qt-libraries-and-rebuilding). The tag and public binary availability follow release publication status. Production/operational licensing suitability is a separate external decision; it is not presented as an unresolved choice of licence for this public AGPL preview. Distribution obligations still apply, and source links alone are not a blanket compliance certificate.
+The product is **Exposure Zone Monitoring**; its repository remains `dropsforum/redzone-ai-monitor`. On publication, the requested public **v1.2.0-rc.1 AGPL evaluation preview** will distribute corresponding application/build source at the [exact release tag](https://github.com/dropsforum/redzone-ai-monitor/tree/v1.2.0-rc.1), together with upstream licence/source references and the [Qt replacement/rebuild/re-sign route](docs/desktop-releases.md#replacing-qt-libraries-and-rebuilding). Public tag/binary availability is not yet confirmed. Production/operational licensing suitability is a separate external decision; it is not presented as an unresolved choice of licence for this public AGPL preview. Distribution obligations still apply, and source links alone are not a blanket compliance certificate.
+
+Packaging includes full GNU AGPL/GPL/LGPL licence texts explicitly, including where Qt wheel contents omit them. Maintainers must verify these texts, applicable copyright/dependency notices and matching source references in both final renamed artifacts. Inclusion of licence texts is not a blanket compliance certificate. Legacy session/cache folder names are intentionally retained for compatibility and history continuity, not a different product or licence.
 
 ## Native Dependencies
 

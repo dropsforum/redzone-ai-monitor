@@ -4,9 +4,10 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-EXE = ROOT / "dist/DROPS Red Zone Monitoring/DROPS Red Zone Monitoring.exe"
+EXE = ROOT / "dist/Exposure Zone Monitoring/ExposureZoneMonitoring.exe"
 REPORT = ROOT / "dist/self-test.json"
 EXPECTED_FIELDS = {
+    "product": "Exposure Zone Monitoring",
     "version": "1.2.0-rc.1",
     "platform": "Windows",
     "model": "yolo26n-seg.pt",

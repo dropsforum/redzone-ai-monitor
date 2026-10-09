@@ -1,4 +1,4 @@
-# PyInstaller spec for DROPS Red Zone Monitoring (macOS arm64)
+# PyInstaller spec for Exposure Zone Monitoring (macOS arm64)
 # Builds a windowed .app that launches the fast native Python/OpenCV app.
 
 import os
@@ -10,7 +10,7 @@ block_cipher = None
 
 # When running spec, __file__ may not be defined; use CWD as project root
 project_root = os.path.abspath(os.getcwd())
-from ai_motion_app.version import MAC_BUNDLE_VERSION, MAC_BUILD_NUMBER
+from ai_motion_app.version import APP_NAME, MAC_BUNDLE_VERSION, MAC_BUILD_NUMBER
 
 # Ultralytics loads task modules dynamically. Torch, torchvision, pygame and
 # Pillow are covered by their PyInstaller hooks; collecting every submodule
@@ -72,7 +72,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="DROPS Red Zone Monitoring",
+    name=APP_NAME,
     console=False,
     disable_windowed_traceback=False,
 )
@@ -84,18 +84,18 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="DROPS Red Zone Monitoring",
+    name=APP_NAME,
 )
 
 app = BUNDLE(
     coll,
-    name="DROPS Red Zone Monitoring.app",
+    name=f"{APP_NAME}.app",
     icon=None,  # Provide packaging/macos/icon.icns if available
     bundle_identifier="com.drillingvr.drops-red-zone-monitoring",
     info_plist={
-        "NSCameraUsageDescription": "DROPS Red Zone Monitor uses the camera to analyze red-zone safety footage locally on this Mac.",
-        "CFBundleName": "DROPS Red Zone Monitoring",
-        "CFBundleDisplayName": "DROPS Red Zone Monitoring",
+        "NSCameraUsageDescription": "Exposure Zone Monitoring uses the camera to analyze safety footage locally on this Mac.",
+        "CFBundleName": APP_NAME,
+        "CFBundleDisplayName": APP_NAME,
         "CFBundleShortVersionString": MAC_BUNDLE_VERSION,
         "CFBundleVersion": MAC_BUILD_NUMBER,
         "LSMinimumSystemVersion": "14.0",

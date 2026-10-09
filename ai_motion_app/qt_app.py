@@ -1,5 +1,5 @@
 """
-Native Qt front end for the DROPS Red Zone Monitoring Mac app.
+Native Qt front end for Exposure Zone Monitoring.
 
 This UI mirrors the web application while keeping the fast Python/OpenCV/
 Ultralytics inference path.
@@ -529,7 +529,7 @@ class RedZoneQtWindow(QMainWindow):
         self._normal_geometry = None
         self.last_discontinuity_serial = self.camera.discontinuity_serial
 
-        self.setWindowTitle("DROPS Red Zone Monitoring")
+        self.setWindowTitle("Exposure Zone Monitoring")
         self.resize(760, 980)
         self._build_ui()
         self._load_zone()
@@ -568,10 +568,8 @@ class RedZoneQtWindow(QMainWindow):
         header = QHBoxLayout(self.header_widget)
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
-        title = QLabel("DROPS RED ZONE")
+        title = QLabel("EXPOSURE ZONE MONITORING")
         title.setObjectName("title")
-        subtitle = QLabel("⚡ YOLO26 AI • PYTHON-NATIVE")
-        subtitle.setObjectName("subtitle")
         self.live_btn = QPushButton("▣ LIVE")
         self.recorded_btn = QPushButton("▣ RECORDED")
         self.live_btn.clicked.connect(lambda: self._set_source_mode("camera"))
@@ -586,7 +584,6 @@ class RedZoneQtWindow(QMainWindow):
         self.ai_chip = QLabel("Loading...")
         self.ai_chip.setObjectName("chip")
         header.addWidget(title)
-        header.addWidget(subtitle)
         header.addStretch(1)
         header.addWidget(self.live_btn)
         header.addWidget(self.recorded_btn)
@@ -753,7 +750,6 @@ class RedZoneQtWindow(QMainWindow):
         self.setStyleSheet(f"""
             QWidget {{ background: white; color: {SLATE_800}; font-family: "Arial"; }}
             QLabel#title {{ color: {ACCENT}; font-size: 17px; font-weight: 900; font-style: italic; }}
-            QLabel#subtitle {{ color: {SLATE_400}; font-size: 9px; font-weight: 800; }}
             QLabel#metric {{ color:{SLATE_800}; font-size:11px; font-weight:800; }}
             QLabel#compactLabel {{ color:{SLATE_400}; font-size:10px; font-weight:900; }}
             QLabel#chip {{ background:{SLATE_50}; border:1px solid {SLATE_200}; border-radius:8px; padding:4px 8px; color:{SLATE_600}; font-size:10px; font-weight:800; }}
@@ -907,6 +903,7 @@ class RedZoneQtWindow(QMainWindow):
             self.recorded_info.setText("No video selected")
         elif self.video_path is not None:
             self.camera.video_path = self.video_path
+            self.recorded_info.setText(self.video_path.name)
         self.camera.start()
         self.last_discontinuity_serial = self.camera.discontinuity_serial
         self.video_panel.set_state(source_mode=self.source_mode, video_label=self.video_path.name if self.video_path else "")

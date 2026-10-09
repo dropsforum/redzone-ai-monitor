@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DROPS FORUM RED ZONE MONITOR POC",
-  description: "AI-Powered Red Zone Monitoring Proof of Concept",
+  title: "Exposure Zone Monitoring",
+  description: "A DROPS Forum prototype supporting exposure-zone assurance and learning.",
 };
 
 export default function RootLayout({

@@ -55,7 +55,7 @@ class MotionDetectionApp:
         # Application state
         self.state = self.STATE_SETUP
         self.running = False
-        self.window_name = "DROPS Red Zone Monitoring"
+        self.window_name = "Exposure Zone Monitoring"
         
         # Performance metrics
         self.fps = 0
@@ -470,7 +470,7 @@ class MotionDetectionApp:
         width = max(int(getattr(self.camera, "width", 1280) or 1280), 640)
         height = max(int(getattr(self.camera, "height", 720) or 720), 360)
         frame = np.zeros((height, width, 3), dtype=np.uint8)
-        cv2.putText(frame, "DROPS Red Zone Monitoring", (30, 70),
+        cv2.putText(frame, "Exposure Zone Monitoring", (30, 70),
                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
         cv2.putText(frame, title, (30, 120),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
@@ -484,7 +484,7 @@ class MotionDetectionApp:
     def run(self):
         """Main application loop"""
         print("\n" + "="*60)
-        print("DROPS Red Zone Monitoring")
+        print("Exposure Zone Monitoring")
         print("="*60)
 
         # Show a window before camera/video initialization so Finder launches

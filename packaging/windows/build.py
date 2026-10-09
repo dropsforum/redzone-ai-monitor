@@ -11,9 +11,10 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-APP_NAME = "DROPS Red Zone Monitoring"
+APP_NAME = "Exposure Zone Monitoring"
+EXE_NAME = "ExposureZoneMonitoring.exe"
 APP = ROOT / "dist" / APP_NAME
-ZIP = ROOT / "dist/DROPS-Red-Zone-Monitoring-Windows-x64.zip"
+ZIP = ROOT / "dist/Exposure-Zone-Monitoring-Windows-x64.zip"
 VERSION = "1.2.0-rc.1"
 FORBIDDEN_SUFFIXES = {
     ".pt", ".pth", ".onnx", ".engine", ".mlmodel", ".mlpackage",
@@ -37,7 +38,7 @@ def is_verified_certifi_ca(path, relative):
 
 def validate_payload(app):
     app = Path(app)
-    if not (app / f"{APP_NAME}.exe").is_file():
+    if not (app / EXE_NAME).is_file():
         raise RuntimeError("Missing frozen executable")
     for path in app.rglob("*"):
         relative = path.relative_to(app)

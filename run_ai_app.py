@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Launcher script for DROPS Red Zone Monitoring
+Launcher script for Exposure Zone Monitoring
 """
 
 import sys
@@ -15,7 +15,7 @@ project_dir = Path(__file__).parent
 sys.path.insert(0, str(project_dir))
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the native DROPS Red Zone Monitoring desktop app.")
+    parser = argparse.ArgumentParser(description="Run the native Exposure Zone Monitoring desktop app.")
     parser.add_argument("--version", action="version", version=APP_VERSION)
     parser.add_argument("--self-test", action="store_true", help="Run a hardware-free packaging check without opening a camera.")
     parser.add_argument("--self-test-output", type=Path, help="Packaging check result path; defaults to the user's application data directory.")

@@ -1,14 +1,18 @@
-# redzone-web-app Integration Package
+# Exposure Zone Monitoring - Web Integration Package
 
-This package contains the Next.js browser-based YOLO detection module for integration into `dropsforum.org`.
+This package contains the Next.js browser-based Exposure Zone Monitoring module for integration into `dropsforum.org`. The product name is **Exposure Zone Monitoring**; the source repository remains `dropsforum/redzone-ai-monitor`.
 
 This is a **web integration package**, not the native desktop download. The native Mac/Windows app uses Python/PySide6/OpenCV and `yolo26n-seg.pt` (`ultralytics==8.4.146`), with MPS on macOS 14+ Apple Silicon arm64 and CPU on Windows 10/11 x64. The browser uses YOLO26n ONNX/WASM detection with different geometry and foot-point zone checks; it does not have native segmentation parity. See [native preview downloads and installation](docs/desktop-releases.md) for `v1.2.0-rc.1`, its publication status and verification scope. Native binaries need no separate Python installation; website developers still need the web dependencies below.
 
 Both targets are evaluation prototypes, not independent safety controls. Site-specific validation, human response, exposure reduction and privacy review remain necessary. Browser camera/file analysis is local, but this alone does not establish privacy compliance for the website into which it is integrated. Native SQLite persistence and five-sheet Excel reporting should not be assumed to exist in this web module.
 
+See the [project philosophy and DROPS Asia/DROPS Forum implementation support](README.md#philosophy): avoid or reduce exposure first, then use monitoring for assurance and learning. The public [DROPS Forum article](https://www.dropsforum.org/red-zone-management#guidance) discusses the shift to Exposure Zone Management; the [full guidelines](https://www.dropsforum.org/publications/exposure-zone-management) remain a working draft, not an endorsed standard. Planning/workshop support does not provide technical enforcement or transfer site-owner accountability. Use the [official contact page](https://www.dropsforum.org/contact) for enquiries.
+
+Consult the exact preview release notes and build manifest for download verification and limitations. Web header/metadata branding changes are source changes, not confirmation of a Vercel deployment. Native session/cache folders retain their legacy names intentionally for compatibility; they are not renamed by this web package.
+
 ## What's included
 
-- **AI Engine**: Client-side YOLO26 (ONNX Runtime Web)
+- **Local Inference**: ONNX Runtime Web (see technical model provenance below)
 - **UI Components**: Camera/recorded-video frame source, Touch-friendly Zone Editor, Detection Overlay
 - **Logic**: Zone intrusion detection, Alert system
 - **Performance**: Optimized for Desktop (10 FPS) and Mobile (3 FPS)

@@ -1,4 +1,4 @@
-# DROPS Red Zone Monitoring - Windows x64 Preview
+# Exposure Zone Monitoring - Windows x64 Preview
 
 Version: 1.2.0-rc.1 for Windows 10/11 x64, with CPU inference.
 This public preview is for demonstration, learning and evaluation, not a
@@ -11,14 +11,14 @@ Download the Windows ZIP and checksums from the exact
 Compare the ZIP's SHA256 with its entry in the release's `SHA256SUMS.txt`:
 
 ```powershell
-Get-FileHash .\DROPS-Red-Zone-Monitoring-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\Exposure-Zone-Monitoring-Windows-x64.zip -Algorithm SHA256
 ```
 
 Stop if the digest differs. Consult the release notes for the actual build
 and verification evidence; a checksum does not establish publisher trust.
 
 Extract the entire ZIP to a writable folder, then open
-`DROPS Red Zone Monitoring/DROPS Red Zone Monitoring.exe`. Keep `_internal`
+`Exposure Zone Monitoring/ExposureZoneMonitoring.exe`. Keep `_internal`
 and all bundled DLLs beside the executable. No Python installation is required.
 This preview is unsigned; Windows may display an unknown-publisher warning.
 Never bypass your organization's application approval requirements.
@@ -42,6 +42,8 @@ Session records are stored locally in
 `%LOCALAPPDATA%\DROPS Red Zone Monitoring\monitoring.sqlite3`; exported reports
 are saved where you choose. Removing the extracted application does not
 remove those records, cached models or exports.
+The legacy cache/data folder name is retained for compatibility with earlier
+previews; the product is now Exposure Zone Monitoring.
 
 See [the desktop guide](docs/desktop-releases.md) for installation, cache,
 monitoring, reports, privacy and source/library guidance, and
@@ -56,7 +58,7 @@ can miss people; use approved exposure-management procedures.
 To run the hardware-free diagnostic from the extracted application folder:
 
 ```powershell
-$app = Start-Process -FilePath '.\DROPS Red Zone Monitoring.exe' -ArgumentList '--self-test', '--self-test-output', 'self-test.json' -Wait -PassThru
+$app = Start-Process -FilePath '.\ExposureZoneMonitoring.exe' -ArgumentList '--self-test', '--self-test-output', 'self-test.json' -Wait -PassThru
 $app.ExitCode
 Get-Content .\self-test.json
 ```
