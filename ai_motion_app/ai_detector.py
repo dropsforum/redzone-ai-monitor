@@ -15,6 +15,8 @@ import numpy as np
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional, Tuple
 
+from .model_cache import MODEL_ASSETS, ensure_model
+
 
 class TrackedDetection(NamedTuple):
     """One person detection with an ID scoped to the current detector session."""
@@ -67,6 +69,8 @@ class AIDetector:
         self.backend = backend if backend in {"pytorch", "coreml"} else "pytorch"
         self.model: Optional[Any] = None
         self.is_loaded = False
+        self.load_status = "Initializing AI"
+        self.load_error = ""
         self.model_version = "unknown"
         self._inference_lock = threading.RLock()
         self._raw_to_session_track: dict[int, int] = {}
@@ -100,11 +104,14 @@ class AIDetector:
         
     def load_model(self) -> bool:
         """Load the YOLO model"""
+        self.load_status = "Initializing AI"
+        self.load_error = ""
         try:
             from ultralytics import YOLO
             from ultralytics import __version__ as ultralytics_version
 
             model_ref = self._resolve_model_ref()
+            self.load_status = "Loading AI model"
             self.device = (
                 "coreml"
                 if self.backend == "coreml"
@@ -118,10 +125,13 @@ class AIDetector:
             self.model.predict(warmup, **self._inference_options())
             self.reset_tracker()
             self.is_loaded = True
+            self.load_status = "AI Ready"
             print(f"✓ YOLO model loaded successfully")
             return True
         except Exception as e:
             self.detector_errors += 1
+            self.load_error = str(e)
+            self.load_status = "AI Failed"
             print(f"✗ Error loading YOLO model: {e}")
             return False
 
@@ -157,7 +167,12 @@ class AIDetector:
             bundled_model = Path.cwd() / "models" / self.model_name
             if bundled_model.exists():
                 return str(bundled_model)
+            if self.model_name in MODEL_ASSETS:
+                return str(ensure_model(self.model_name, self._set_load_status))
         return self.model_name
+
+    def _set_load_status(self, status: str) -> None:
+        self.load_status = status
 
     def _inference_options(self) -> dict[str, Any]:
         options: dict[str, Any] = {

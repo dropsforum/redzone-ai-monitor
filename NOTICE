@@ -8,7 +8,13 @@ Third-party components include:
 - Ultralytics YOLO tooling and models. Users must obtain/export model weights locally and comply with Ultralytics license terms.
 - ONNX Runtime Web, used for browser inference runtime assets.
 - Next.js, React, Tailwind CSS, and related npm packages for the web app.
-- Python, OpenCV, PySide6, PyTorch, and Ultralytics dependencies for the native Mac app.
+- Python, OpenCV, PySide6, PyTorch, and Ultralytics dependencies for the native Mac and Windows apps.
 
 The browser expects a locally generated model at `public/models/yolo26n.onnx`.
-The native Mac app can download/use `yolo26n.pt` locally through Ultralytics tooling during development or packaging.
+Native release bundles do not contain model checkpoints. On first use they download
+the approved `yolo26n-seg.pt` (default) or `yolo26n.pt` directly from official
+Ultralytics assets into the user's cache and verify its pinned SHA-256.
+
+Project SPDX licence: AGPL-3.0-or-later. See LICENSE for the complete AGPL text.
+See THIRD_PARTY_NOTICES.md and bundled upstream licence texts for dependency
+obligations. Evaluation releases do not certify production licensing or safety.

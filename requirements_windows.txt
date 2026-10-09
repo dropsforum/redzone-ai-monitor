@@ -1,0 +1,14 @@
+# Python 3.11, Windows x64. Install CPU torch/vision first using the official
+# CPU index (see desktop-windows.yml); do not replace unavailable pins.
+torch==2.12.0+cpu
+torchvision==0.27.0+cpu
+ultralytics==8.4.146
+opencv-python==4.13.0.92
+lap==0.5.13
+numpy>=1.26.0,<3.0.0
+pygame==2.6.1
+PySide6==6.11.1
+Pillow>=10.0.0,<13.0.0
+pyyaml>=6.0.3
+python-dateutil>=2.9.0
+pyinstaller==6.21.0

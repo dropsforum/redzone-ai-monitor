@@ -3,12 +3,13 @@
 
 import os
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
 block_cipher = None
 
 # When running spec, __file__ may not be defined; use CWD as project root
 project_root = os.path.abspath(os.getcwd())
+from ai_motion_app.version import MAC_BUNDLE_VERSION, MAC_BUILD_NUMBER
 
 # Ultralytics loads task modules dynamically. Torch, torchvision, pygame and
 # Pillow are covered by their PyInstaller hooks; collecting every submodule
@@ -29,24 +30,12 @@ for pkg in [
     except Exception:
         pass
 
-# Bundle the detection fallback and close-range segmentation model if present.
-local_datas = []
-for model_name in ["yolo26n.pt", "yolo26n-seg.pt"]:
-    for model_path in [
-        Path(project_root) / "models" / model_name,
-        Path(project_root) / model_name,
-    ]:
-        if model_path.exists():
-            local_datas.append((str(model_path), "models"))
-            break
-
-for asset_dir in [
-    Path(project_root) / "assets",
-]:
-    if asset_dir.exists():
-        local_datas.append((str(asset_dir), asset_dir.name))
-
-datas.extend(local_datas)
+# Models and user data must never be copied from the developer's checkout.
+for filename in ["LICENSE", "THIRD_PARTY_NOTICES.md"]:
+    datas.append((os.path.join(project_root, filename), "."))
+datas.append((os.path.join(project_root, "docs", "desktop-releases.md"), "docs"))
+for distribution in ["ultralytics", "torch", "torchvision", "PySide6", "PySide6_Essentials", "PySide6_Addons", "shiboken6", "opencv-python", "numpy", "pygame", "Pillow"]:
+    datas.extend(copy_metadata(distribution))
 
 a = Analysis(
     [os.path.join(project_root, "run_ai_app.py")],
@@ -90,9 +79,9 @@ app = BUNDLE(
         "NSCameraUsageDescription": "DROPS Red Zone Monitor uses the camera to analyze red-zone safety footage locally on this Mac.",
         "CFBundleName": "DROPS Red Zone Monitoring",
         "CFBundleDisplayName": "DROPS Red Zone Monitoring",
-        "CFBundleShortVersionString": "0.2.0",
-        "CFBundleVersion": "2",
-        "LSMinimumSystemVersion": "12.0",
+        "CFBundleShortVersionString": MAC_BUNDLE_VERSION,
+        "CFBundleVersion": MAC_BUILD_NUMBER,
+        "LSMinimumSystemVersion": "14.0",
         "LSApplicationCategoryType": "public.app-category.utilities",
         "CFBundleDocumentTypes": [
             {

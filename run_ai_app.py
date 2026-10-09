@@ -8,12 +8,17 @@ import os
 import argparse
 from pathlib import Path
 
+from ai_motion_app.version import APP_VERSION
+
 # Add the project directory to Python path
 project_dir = Path(__file__).parent
 sys.path.insert(0, str(project_dir))
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the native DROPS Red Zone Monitoring Mac app.")
+    parser = argparse.ArgumentParser(description="Run the native DROPS Red Zone Monitoring desktop app.")
+    parser.add_argument("--version", action="version", version=APP_VERSION)
+    parser.add_argument("--self-test", action="store_true", help="Run a hardware-free packaging check without opening a camera.")
+    parser.add_argument("--self-test-output", type=Path, default=Path("self-test.json"), help="Path for the packaging check result.")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--camera", type=int, help="Use a camera index, for example --camera 0.")
     source.add_argument("--video", type=str, help="Use a recorded video file. Playback starts when monitoring starts.")
@@ -39,6 +44,11 @@ def main():
     """Run the application"""
     try:
         args = parse_args()
+
+        if args.self_test:
+            from ai_motion_app.self_test import run_self_test
+
+            return run_self_test(args.self_test_output, args.device or "auto")
 
         if not args.legacy_opencv:
             from ai_motion_app.qt_app import run_qt_app

@@ -15,7 +15,7 @@ from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -77,6 +77,8 @@ def button(text: str, kind: str = "secondary") -> QPushButton:
 
 
 class VideoPanel(QFrame):
+    VERTEX_HIT_RADIUS = 14
+
     def __init__(
         self,
         on_file_drop: Callable[[Path], None],
@@ -98,7 +100,10 @@ class VideoPanel(QFrame):
         self.traffic = "green"
         self.ai_status = "Initializing AI"
         self.drag_active = False
+        self._drag_vertex_index: Optional[int] = None
+        self._drag_offset = QPointF()
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
         self.setMinimumSize(640, 360)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         policy.setHeightForWidth(True)
@@ -143,9 +148,13 @@ class VideoPanel(QFrame):
         if zone_contacts is not None:
             self.zone_contacts = zone_contacts
         if zone is not None:
+            if zone is not self.zone:
+                self._clear_vertex_drag()
             self.zone = zone
         if is_drawing is not None:
             self.is_drawing = is_drawing
+            if not is_drawing:
+                self._clear_vertex_drag()
         if is_monitoring is not None:
             self.is_monitoring = is_monitoring
         if is_fullscreen is not None:
@@ -169,13 +178,52 @@ class VideoPanel(QFrame):
         draw_h = h * scale
         return QRectF((panel.width() - draw_w) / 2, (panel.height() - draw_h) / 2, draw_w, draw_h)
 
-    def normalized_from_event(self, event) -> Optional[Point]:
+    def normalized_from_position(
+        self, position: QPointF, *, clamp_to_frame: bool = False
+    ) -> Optional[Point]:
         rect = self.frame_rect()
-        if not rect.contains(event.position()):
+        if not rect.contains(position) and not clamp_to_frame:
             return None
-        x = (event.position().x() - rect.left()) / rect.width()
-        y = (event.position().y() - rect.top()) / rect.height()
+        if not rect.width() or not rect.height():
+            return None
+        x = (position.x() - rect.left()) / rect.width()
+        y = (position.y() - rect.top()) / rect.height()
         return max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
+
+    def normalized_from_event(self, event) -> Optional[Point]:
+        return self.normalized_from_position(event.position())
+
+    def _vertex_at(self, position: QPointF) -> Optional[int]:
+        rect = self.frame_rect()
+        nearest_index = None
+        nearest_distance_squared = self.VERTEX_HIT_RADIUS ** 2
+        for index, point in enumerate(self.zone):
+            handle = self._to_panel(point, rect)
+            dx = position.x() - handle.x()
+            dy = position.y() - handle.y()
+            distance_squared = dx * dx + dy * dy
+            if distance_squared <= nearest_distance_squared:
+                nearest_index = index
+                nearest_distance_squared = distance_squared
+        return nearest_index
+
+    def _clear_vertex_drag(self):
+        was_dragging = self._drag_vertex_index is not None
+        self._drag_vertex_index = None
+        self._drag_offset = QPointF()
+        if was_dragging:
+            self.releaseMouse()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _update_pointer_cursor(self, position: QPointF):
+        if self._drag_vertex_index is not None:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif self.fullscreen_button_rect().contains(position):
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif self.is_drawing and self._vertex_at(position) is not None:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mousePressEvent(self, event):  # noqa: N802 - Qt API
         if event.button() == Qt.MouseButton.LeftButton and self.fullscreen_button_rect().contains(event.position()):
@@ -183,11 +231,52 @@ class VideoPanel(QFrame):
             event.accept()
             return
         if self.is_drawing and event.button() == Qt.MouseButton.LeftButton:
+            vertex_index = self._vertex_at(event.position())
+            if vertex_index is not None:
+                handle = self._to_panel(self.zone[vertex_index], self.frame_rect())
+                self._drag_vertex_index = vertex_index
+                self._drag_offset = event.position() - handle
+                self.grabMouse()
+                self._update_pointer_cursor(event.position())
+                event.accept()
+                return
             point = self.normalized_from_event(event)
             if point is not None:
                 self.zone.append(point)
                 self.update()
+                event.accept()
+                return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802 - Qt API
+        if self._drag_vertex_index is not None:
+            if not event.buttons() & Qt.MouseButton.LeftButton:
+                self._clear_vertex_drag()
+            else:
+                point = self.normalized_from_position(
+                    event.position() - self._drag_offset, clamp_to_frame=True
+                )
+                if point is not None:
+                    self.zone[self._drag_vertex_index] = point
+                    self.update()
+                self._update_pointer_cursor(event.position())
+                event.accept()
+                return
+        self._update_pointer_cursor(event.position())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 - Qt API
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_vertex_index is not None:
+            self._clear_vertex_drag()
+            self._update_pointer_cursor(event.position())
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def event(self, event):  # noqa: A003 - Qt API
+        if event.type() == QEvent.Type.UngrabMouse:
+            self._clear_vertex_drag()
+        return super().event(event)
 
     def dragEnterEvent(self, event):  # noqa: N802 - Qt API
         if self.source_mode == "file" and event.mimeData().hasUrls():
@@ -282,7 +371,7 @@ class VideoPanel(QFrame):
             pen.setDashPattern([5, 5])
         painter.setPen(pen)
         painter.setBrush(QColor(220, 38, 38, 76) if len(points) >= 3 and not self.is_drawing else Qt.BrushStyle.NoBrush)
-        if len(points) >= 3 and not self.is_drawing:
+        if len(points) >= 3:
             painter.drawPolygon(points)
         else:
             for idx in range(len(points) - 1):
@@ -291,7 +380,7 @@ class VideoPanel(QFrame):
             painter.setPen(QPen(QColor(RED), 2))
             painter.setBrush(QColor("white"))
             for p in points:
-                painter.drawEllipse(p, 6, 6)
+                painter.drawEllipse(p, 8, 8)
 
     def _paint_detections(self, painter: QPainter, rect: QRectF):
         if self.frame is None:
@@ -1108,8 +1197,12 @@ class RedZoneQtWindow(QMainWindow):
         if self.load_future is not None and self.load_future.done():
             self.load_future.result()
             self.load_future = None
-            self.ai_chip.setText("AI Ready" if self.detector.is_loaded else "AI Failed")
+            self.ai_chip.setText(self.detector.load_status)
+            self.ai_chip.setToolTip(self.detector.load_error)
             self._sync_controls()
+
+        if self.load_future is not None:
+            self.ai_chip.setText(self.detector.load_status)
 
         ret, frame = self.camera.read_frame()
         if self.camera.discontinuity_serial != self.last_discontinuity_serial:
@@ -1136,7 +1229,7 @@ class RedZoneQtWindow(QMainWindow):
             is_drawing=self.is_drawing,
             is_monitoring=self.is_monitoring,
             traffic=self.traffic,
-            ai_status="AI Ready" if self.detector.is_loaded else "Initializing AI",
+            ai_status=self.detector.load_status,
         )
         self.zone = self.video_panel.zone
         self._sync_controls()

@@ -37,6 +37,9 @@ def is_linux() -> bool:
 # Platform-specific paths
 def get_config_dir() -> Path:
     """Get platform-specific configuration directory"""
+    override = os.environ.get("REDZONE_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
     if is_windows():
         # Windows: Use AppData\Local
         app_data = os.getenv('LOCALAPPDATA', os.path.expanduser('~/.local'))
@@ -186,4 +189,3 @@ def get_platform_info() -> dict:
         'processor': platform.processor(),
         'python_version': platform.python_version(),
     }
-
