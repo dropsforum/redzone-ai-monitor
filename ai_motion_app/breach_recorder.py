@@ -8,7 +8,7 @@ import time
 import uuid
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from xml.sax.saxutils import escape
@@ -463,11 +463,13 @@ def format_duration(seconds: float) -> str:
 
 
 def _local_datetime(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.fromtimestamp(timestamp, timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _iso_datetime(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp).astimezone().isoformat(timespec="seconds")
+    # An aware UTC value avoids Windows treating an early epoch as pre-1970
+    # when applying the runner's local timezone.
+    return datetime.fromtimestamp(timestamp, timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 def _write_xlsx(path: Path, sheets: list[tuple[str, list[list[object]]]]):
