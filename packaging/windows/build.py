@@ -68,6 +68,8 @@ def add_documents(app):
         raise RuntimeError(f"Missing CPython license: {python_license}")
     (app / "licenses").mkdir(exist_ok=True)
     shutil.copy2(python_license, app / "licenses/Python-LICENSE.txt")
+    for name in ("LGPL-3.0.txt", "GPL-3.0.txt"):
+        shutil.copy2(ROOT / "packaging/licenses" / name, app / "licenses" / name)
 
     # Preserve license texts supplied by installed wheels, including Qt and
     # native-library notices. Record the actual resolved transitive versions.

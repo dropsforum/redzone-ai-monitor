@@ -37,6 +37,8 @@ for filename in ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "PACKAGE_README.
 datas.append((os.path.join(project_root, "docs", "desktop-releases.md"), "docs"))
 datas.append((os.path.join(project_root, "docs", "yolo26-model-ops.md"), "docs"))
 datas.append((os.path.join(project_root, "packaging", "macos", "Python-LICENSE.txt"), "licenses"))
+for filename in ["LGPL-3.0.txt", "GPL-3.0.txt"]:
+    datas.append((os.path.join(project_root, "packaging", "licenses", filename), "licenses"))
 for distribution in ["ultralytics", "torch", "torchvision", "PySide6", "PySide6_Essentials", "PySide6_Addons", "shiboken6", "opencv-python", "numpy", "pygame", "Pillow"]:
     datas.extend(copy_metadata(distribution))
 

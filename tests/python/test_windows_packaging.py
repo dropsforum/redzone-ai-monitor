@@ -120,6 +120,7 @@ class WindowsPackagingTests(unittest.TestCase):
             for name in (
                 "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "requirements_windows.txt", "LICENSE.txt",
                 "packaging/windows/README.md", "docs/desktop-releases.md",
+                "packaging/licenses/LGPL-3.0.txt", "packaging/licenses/GPL-3.0.txt",
                 "docs/yolo26-model-ops.md", "demo-1.dist-info/licenses/LICENSE",
             ):
                 path = root / name
