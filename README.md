@@ -15,7 +15,7 @@ This repository contains two DROPS Red Zone Monitoring targets:
 
 ## Native Preview Downloads
 
-Preview **v1.2.0-rc.1** is for demonstration and evaluation only. Public-download availability is not yet confirmed; check the exact release notes for publication status and verification evidence. These links identify the preview, not the older stable release:
+Preview **v1.2.0-rc.1** is for demonstration and evaluation only. Use the exact release notes for package verification and limitations. These links identify the preview, not the older stable release:
 
 - [Preview release and verification notes](https://github.com/dropsforum/redzone-ai-monitor/releases/tag/v1.2.0-rc.1)
 - [Mac download: DROPS-Red-Zone-Monitoring-macos-arm64.dmg](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/DROPS-Red-Zone-Monitoring-macos-arm64.dmg)
@@ -67,7 +67,7 @@ The native app uses the same PySide6 UI on Mac and Windows, not Tauri or Electro
 
 Native model: `yolo26n-seg.pt`, with `ultralytics==8.4.146`. Mac uses PyTorch/MPS; the Windows preview uses CPU. Performance depends on the device, source and scene; no Windows hardware performance result is asserted.
 
-Maintainer-reported Mac verification: **49 assembled Python tests passed**, and the source self-test passed with actual model loading and inference on **MPS**, using Ultralytics **8.4.146**. These results do not establish packaged-download verification, Windows hardware validation or operational safety acceptance.
+Maintainer verification: **58 assembled Python tests passed**, and the Mac self-test passed with actual model loading and inference on **MPS**, using Ultralytics **8.4.146**. Exact packaged-build evidence is in the release notes and build manifest. Automated checks do not establish physical-camera, Windows hardware or operational safety acceptance.
 
 ### Run locally
 

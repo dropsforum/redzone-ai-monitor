@@ -2,7 +2,7 @@
 
 ## Release Status
 
-Preview: **v1.2.0-rc.1** in the public `dropsforum/redzone-ai-monitor` repository. This is a prerelease for demonstration, learning and evaluation, not a validated operational safety control. Public release/download verification is not yet confirmed. Links below identify the release destinations and may be unavailable until publication; consult the exact release notes for current status.
+Preview: **v1.2.0-rc.1** in the public `dropsforum/redzone-ai-monitor` repository. This is a prerelease for demonstration, learning and evaluation, not a validated operational safety control. Consult the exact release notes and build manifest for artifact verification and limitations.
 
 The older stable **v1.1.0 (December 2025)** is not this native preview. Use the exact tag rather than GitHub's latest-stable shortcut.
 
@@ -77,7 +77,7 @@ Monitoring should challenge the need for entry, not normalize line-of-fire expos
 
 ## Verification Scope
 
-The maintainer reports **49 assembled Python tests passed** and a successful **source self-test with actual model loading/inference on Mac MPS**, using Ultralytics **8.4.146**. The source self-test exercises recorded-video playback, Qt rendering/zone dragging, contact-state logic, SQLite persistence, five-sheet export and model inference. It uses generated footage, not a physical camera or a representative site trial. These are source/assembled-check results, not proof that a published DMG/ZIP installs correctly, a public download is reachable, Windows hardware has been validated or the app is safe for operational use.
+The maintainer reports **58 assembled Python tests passed** and successful **Mac self-tests with actual model loading/inference on MPS**, using Ultralytics **8.4.146**. The self-test exercises recorded-video playback, Qt rendering/zone dragging, contact-state logic, SQLite persistence, five-sheet export and model inference. It uses generated footage, not a physical camera or a representative site trial. Exact packaged-build and public-download evidence belongs to the release notes/build manifest. Automated checks do not establish Windows hardware validation or operational safety acceptance.
 
 For reproducibility in the development environment:
 
