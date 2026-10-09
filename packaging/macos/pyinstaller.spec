@@ -2,6 +2,7 @@
 # Builds a windowed .app that launches the fast native Python/OpenCV app.
 
 import os
+from importlib import metadata
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
@@ -31,11 +32,25 @@ for pkg in [
         pass
 
 # Models and user data must never be copied from the developer's checkout.
-for filename in ["LICENSE", "THIRD_PARTY_NOTICES.md"]:
+for filename in ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "PACKAGE_README.md"]:
     datas.append((os.path.join(project_root, filename), "."))
 datas.append((os.path.join(project_root, "docs", "desktop-releases.md"), "docs"))
+datas.append((os.path.join(project_root, "docs", "yolo26-model-ops.md"), "docs"))
+datas.append((os.path.join(project_root, "packaging", "macos", "Python-LICENSE.txt"), "licenses"))
 for distribution in ["ultralytics", "torch", "torchvision", "PySide6", "PySide6_Essentials", "PySide6_Addons", "shiboken6", "opencv-python", "numpy", "pygame", "Pillow"]:
     datas.extend(copy_metadata(distribution))
+
+# Include the license texts of transitive dependencies, not just direct wheels.
+for distribution in metadata.distributions():
+    for entry in distribution.files or ():
+        parts = entry.parts
+        info_index = next((i for i, part in enumerate(parts) if part.endswith(".dist-info")), None)
+        if info_index is None or not any("license" in part.lower() or "notice" in part.lower() for part in parts):
+            continue
+        source = Path(distribution.locate_file(entry))
+        if source.is_file():
+            destination = Path("licenses").joinpath(*parts[info_index:-1])
+            datas.append((str(source), str(destination)))
 
 a = Analysis(
     [os.path.join(project_root, "run_ai_app.py")],

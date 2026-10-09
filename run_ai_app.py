@@ -18,7 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run the native DROPS Red Zone Monitoring desktop app.")
     parser.add_argument("--version", action="version", version=APP_VERSION)
     parser.add_argument("--self-test", action="store_true", help="Run a hardware-free packaging check without opening a camera.")
-    parser.add_argument("--self-test-output", type=Path, default=Path("self-test.json"), help="Path for the packaging check result.")
+    parser.add_argument("--self-test-output", type=Path, help="Packaging check result path; defaults to the user's application data directory.")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--camera", type=int, help="Use a camera index, for example --camera 0.")
     source.add_argument("--video", type=str, help="Use a recorded video file. Playback starts when monitoring starts.")
@@ -47,8 +47,10 @@ def main():
 
         if args.self_test:
             from ai_motion_app.self_test import run_self_test
+            from ai_motion_app.platform_utils import get_app_data_dir
 
-            return run_self_test(args.self_test_output, args.device or "auto")
+            output_path = args.self_test_output or get_app_data_dir() / "self-test.json"
+            return run_self_test(output_path, args.device or "auto")
 
         if not args.legacy_opencv:
             from ai_motion_app.qt_app import run_qt_app

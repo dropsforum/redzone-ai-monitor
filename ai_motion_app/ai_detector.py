@@ -106,6 +106,8 @@ class AIDetector:
         """Load the YOLO model"""
         self.load_status = "Initializing AI"
         self.load_error = ""
+        self.is_loaded = False
+        self.model = None
         try:
             from ultralytics import YOLO
             from ultralytics import __version__ as ultralytics_version
@@ -161,14 +163,10 @@ class AIDetector:
                 "Pass --model /path/to/yolo26n.mlpackage or set "
                 "REDZONE_COREML_MODEL."
             )
+        if self.model_name in MODEL_ASSETS:
+            return str(ensure_model(self.model_name, self._set_load_status))
         if model_path.exists():
             return str(model_path)
-        if model_path.parent == Path("."):
-            bundled_model = Path.cwd() / "models" / self.model_name
-            if bundled_model.exists():
-                return str(bundled_model)
-            if self.model_name in MODEL_ASSETS:
-                return str(ensure_model(self.model_name, self._set_load_status))
         return self.model_name
 
     def _set_load_status(self, status: str) -> None:

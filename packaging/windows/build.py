@@ -27,6 +27,14 @@ FORBIDDEN_NAMES = {
 }
 
 
+def is_verified_certifi_ca(path, relative):
+    if relative.as_posix() != "_internal/certifi/cacert.pem" or not path.is_file():
+        return False
+    import certifi
+    installed_ca = Path(certifi.where())
+    return installed_ca.is_file() and sha256(path.read_bytes()).digest() == sha256(installed_ca.read_bytes()).digest()
+
+
 def validate_payload(app):
     app = Path(app)
     if not (app / f"{APP_NAME}.exe").is_file():
@@ -37,7 +45,8 @@ def validate_payload(app):
             raise RuntimeError(f"Symlink is not allowed: {relative}")
         parts = {part.lower() for part in relative.parts}
         if (
-            path.suffix.lower() in FORBIDDEN_SUFFIXES
+            (path.suffix.lower() in FORBIDDEN_SUFFIXES
+             and not is_verified_certifi_ca(path, relative))
             or path.name.lower() in FORBIDDEN_NAMES
             or path.name.lower().startswith(".env.")
             or parts & {"logs", "videos", "user_data", ".git", "__pycache__", "tests"}

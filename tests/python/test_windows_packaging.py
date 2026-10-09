@@ -26,6 +26,19 @@ self_test = load_module("verify_self_test")
 
 
 class WindowsPackagingTests(unittest.TestCase):
+    def success_report(self):
+        return {
+            "success": True, "version": "1.2.0-rc.1", "platform": "Windows",
+            "model": "yolo26n-seg.pt", "ultralytics": "8.4.146", "backend": "pytorch/cpu",
+            "checks": [
+                "recorded-video-decoding-and-normal-speed-playback",
+                "qt-rendering-and-draggable-zone-corners",
+                "silhouette-contact-entry-and-exit-grace",
+                "sqlite-and-five-sheet-excel-report",
+                "verified-model-download-segmentation-tracking-and-inference",
+            ],
+        }
+
     def make_app(self, root):
         app = Path(root) / build.APP_NAME
         app.mkdir()
@@ -54,6 +67,7 @@ class WindowsPackagingTests(unittest.TestCase):
             "yolo26n-seg.pt", "weights.onnx", "clip.mp4", "private.sqlite3",
             ".env.local", "config.json", "settings.json", "credentials.json",
             "build.log", "key.pfx", "self-test.json", "tests/example.py",
+            "private.pem", "private.key", "certifi/private.pem", "certifi/private.key",
         ):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 app = self.make_app(directory)
@@ -63,6 +77,36 @@ class WindowsPackagingTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Forbidden release payload"):
                     build.archive(app, Path(directory) / "release.zip")
                 self.assertFalse((Path(directory) / "release.zip").exists())
+
+    def test_accepts_only_hash_verified_installed_certifi_ca(self):
+        import certifi
+        ca_bytes = Path(certifi.where()).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(directory)
+            ca = app / "_internal/certifi/cacert.pem"
+            ca.parent.mkdir()
+            ca.write_bytes(ca_bytes)
+            output = Path(directory) / "release.zip"
+            build.archive(app, output)
+            with zipfile.ZipFile(output) as bundle:
+                self.assertEqual(bundle.read(f"{build.APP_NAME}/_internal/certifi/cacert.pem"), ca_bytes)
+            ca.write_bytes(ca_bytes + b"\nmodified")
+            with self.assertRaisesRegex(RuntimeError, "Forbidden release payload"):
+                build.validate_payload(app)
+            ca.write_bytes(b"-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----")
+            with self.assertRaisesRegex(RuntimeError, "Forbidden release payload"):
+                build.validate_payload(app)
+
+    def test_rejects_verified_ca_outside_exact_certifi_location(self):
+        import certifi
+        for name in ("cacert.pem", "certifi/other.pem", "certifi/cacert.key", "other/cacert.pem"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                app = self.make_app(directory)
+                ca = app / "_internal" / name
+                ca.parent.mkdir(parents=True, exist_ok=True)
+                ca.write_bytes(Path(certifi.where()).read_bytes())
+                with self.assertRaisesRegex(RuntimeError, "Forbidden release payload"):
+                    build.validate_payload(app)
 
     def test_rejects_missing_executable(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -120,16 +164,17 @@ class WindowsPackagingTests(unittest.TestCase):
                 self.assertEqual(command[1:3], ["--self-test", "--self-test-output"])
                 self.assertEqual(Path(command[3]), report.resolve())
                 self.assertEqual(kwargs["timeout"], 600)
-                report.write_text('{"success": true}')
+                report.write_text(json.dumps(self.success_report()))
                 return subprocess.CompletedProcess(command, 0)
 
             with patch.object(self_test.subprocess, "run", side_effect=run):
-                self.assertEqual(self_test.run_self_test(Path(directory) / "app.exe", report), {"success": True})
+                self.assertEqual(self_test.run_self_test(Path(directory) / "app.exe", report), self.success_report())
 
     def test_self_test_rejects_failure_missing_invalid_and_false_reports(self):
         for returncode, payload in (
             (1, '{"success":true}'), (0, None), (0, "invalid"),
             (0, '{"success":false}'), (0, '{"success":"true"}'), (0, "[]"),
+            (0, '{"success":true}'),
         ):
             with self.subTest(returncode=returncode, payload=payload), tempfile.TemporaryDirectory() as directory:
                 report = Path(directory) / "self-test.json"
@@ -142,6 +187,47 @@ class WindowsPackagingTests(unittest.TestCase):
                 with patch.object(self_test.subprocess, "run", side_effect=run):
                     with self.assertRaises((RuntimeError, FileNotFoundError, json.JSONDecodeError)):
                         self_test.run_self_test(Path(directory) / "app.exe", report)
+
+    def test_self_test_rejects_wrong_or_missing_identity_and_field_types(self):
+        wrong_values = {
+            "version": "1.2.0", "platform": "Darwin", "model": "yolo26n.pt",
+            "ultralytics": "8.4.68", "backend": "pytorch/mps", "success": False,
+        }
+        for field, wrong in wrong_values.items():
+            for value in (wrong, None, 1, [], {}, True if field != "success" else "true"):
+                with self.subTest(field=field, value=value):
+                    payload = self.success_report()
+                    payload[field] = value
+                    with self.assertRaises(RuntimeError):
+                        self_test.validate_report(payload)
+            payload = self.success_report()
+            del payload[field]
+            with self.subTest(missing=field), self.assertRaises(RuntimeError):
+                self_test.validate_report(payload)
+        payload = self.success_report()
+        payload["backend"] = "coreml"
+        with self.assertRaises(RuntimeError):
+            self_test.validate_report(payload)
+
+    def test_self_test_requires_exact_unique_five_check_coverage(self):
+        checks = self.success_report()["checks"]
+        for invalid in (
+            None, "all passed", {}, [], checks[:-1], checks + ["extra"],
+            checks[:-1] + [checks[0]], checks[:-1] + ["unknown"],
+            checks[:-1] + [True], checks[:-1] + [[]], checks[:-1] + [1],
+        ):
+            with self.subTest(checks=invalid):
+                payload = self.success_report()
+                payload["checks"] = invalid
+                with self.assertRaises(RuntimeError):
+                    self_test.validate_report(payload)
+        payload = self.success_report()
+        del payload["checks"]
+        with self.assertRaises(RuntimeError):
+            self_test.validate_report(payload)
+        payload = self.success_report()
+        payload["checks"].reverse()
+        self_test.validate_report(payload)
 
     def test_self_test_timeout_is_a_failure(self):
         with tempfile.TemporaryDirectory() as directory:

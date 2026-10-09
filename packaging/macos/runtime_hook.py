@@ -3,14 +3,9 @@ import sys
 import importlib.util
 from pathlib import Path
 
-# Ensure working directory points inside the app bundle for relative paths
+# Keep caller-relative video/report paths outside the signed bundle.
 base = getattr(sys, '_MEIPASS', None)
 if base:
-    try:
-        os.chdir(base)
-    except Exception:
-        pass
-
     cv2_extension = Path(base) / "cv2" / "cv2.abi3.so"
     if cv2_extension.exists() and "cv2" not in sys.modules:
         spec = importlib.util.spec_from_file_location("cv2", cv2_extension)
@@ -21,5 +16,4 @@ if base:
 
 # Prefer Metal (MPS) backend when available; allow fallback
 os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
-
 

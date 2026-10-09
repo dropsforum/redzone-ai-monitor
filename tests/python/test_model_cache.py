@@ -66,6 +66,26 @@ class ModelCacheTests(unittest.TestCase):
                 model_cache.ensure_model(self.name)
         self.assertEqual([], list(self.cache.iterdir()))
 
+    def test_default_resolution_cannot_use_cwd_checkpoint(self):
+        from ai_motion_app.ai_detector import AIDetector
+
+        verified = self.cache / self.name
+        for same_named_file in [Path(self.name), Path("models") / self.name]:
+            with patch.object(Path, "exists", return_value=True), patch(
+                "ai_motion_app.ai_detector.ensure_model", return_value=verified
+            ) as verify:
+                self.assertEqual(str(verified), AIDetector()._resolve_model_ref())
+                verify.assert_called_once()
+
+    def test_explicit_checkpoint_path_remains_supported(self):
+        from ai_motion_app.ai_detector import AIDetector
+
+        explicit = self.cache / "custom.pt"
+        explicit.write_bytes(b"explicit user checkpoint")
+        with patch("ai_motion_app.ai_detector.ensure_model") as verify:
+            self.assertEqual(str(explicit), AIDetector(model_name=str(explicit))._resolve_model_ref())
+        verify.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
