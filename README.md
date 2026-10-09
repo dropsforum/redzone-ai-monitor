@@ -2,13 +2,32 @@
 
 Exposure Zone Monitoring is a prototype application exploring how local AI and computer vision can support Exposure Zone Management.
 
+## Download the App
+
+**Ready-built apps for Mac and Windows. No Python installation or build steps required.**
+
+| Platform | Download | Requirements |
+| --- | --- | --- |
+| **Mac** | **[Download for Mac (.dmg)](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/Exposure-Zone-Monitoring-macos-arm64.dmg)** | Apple Silicon (M-series), macOS 14 or later |
+| **Windows** | **[Download for Windows (.zip)](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/Exposure-Zone-Monitoring-Windows-x64.zip)** | Windows 10/11, x64 |
+
+**Mac:** Open the DMG and copy **Exposure Zone Monitoring.app** to Applications.
+
+**Windows:** Extract the entire ZIP and run **ExposureZoneMonitoring.exe** inside the **Exposure Zone Monitoring** folder. Keep the bundled libraries alongside it.
+
+Current download: **v1.2.0-rc.1, an evaluation preview**, not a validated operational safety control. Mac is Developer ID signed but **not Apple-notarized**; Windows is **unsigned**. Security warnings may appear: verify the source/checksum and follow your organization's policy rather than disabling protections. Intel Macs and Windows ARM are unsupported. Internet access is required for the first model download.
+
+[Release notes](https://github.com/dropsforum/redzone-ai-monitor/releases/tag/v1.2.0-rc.1) | [Download checksums](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/SHA256SUMS.txt) | [Build verification](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/build-manifest.json) | [Installation guide](docs/desktop-releases.md)
+
+Use the app links above, not **Code > Download ZIP**, which downloads source code. GitHub's latest-stable shortcut still points to the older v1.1.0 release, not this preview.
+
+## Philosophy
+
 The project is based on a simple principle: monitoring should help organizations challenge access, not merely administer it. A person entering a red zone, restricted access zone, or other line-of-fire exposure area should not be treated as normal simply because entry can be detected, alarmed, or recorded. The stronger question is whether the work could have been designed so that entry was avoided, reduced, shortened, delayed, or better controlled in the first place.
 
 This app is therefore not intended to make entry into hazardous areas acceptable. It is intended to help teams verify whether controls are working, detect unauthorized or unexpected presence, and identify exposure patterns that should trigger learning and improvement.
 
 In the context of DROPS Exposure Zone Management, AI monitoring can support assurance by helping teams see where exposure occurs, whether access rules are being followed, and where repeated entry may indicate a deeper planning or design issue. The goal is not better permission to enter danger. The goal is better evidence to reduce the need for entry.
-
-## Philosophy
 
 **Avoid or reduce exposure first; use AI for assurance second.** Define zones by the hazards and work conditions that expose people, not by colour alone. Redesign or resequence tasks, relocate work positions and consider tooling or remote methods before relying on permission to enter. Where entry remains necessary, make it intentional, controlled and time-limited, with clear ownership and a review of repeated exposure.
 
@@ -35,19 +54,9 @@ This repository contains two Exposure Zone Monitoring targets:
 - **Native desktop app**: Python/PySide6/OpenCV/Ultralytics, packaged with PyInstaller for macOS 14+ on Apple Silicon arm64 (MPS inference) and Windows 10/11 x64 (CPU inference).
 - **Web app**: a Next.js browser proof of concept using local detection with ONNX Runtime Web/WASM. Its zone geometry and foot-point checks differ from native segmentation; it does not have segmentation parity. Model details are in the technical provenance section below.
 
-## Native Preview Downloads
+## Desktop Installation and Models
 
-Preview **v1.2.0-rc.1** is for demonstration and evaluation only. Use the exact release below; its release notes and build manifest describe the verification performed and remaining limitations:
-
-- [Preview release and verification notes](https://github.com/dropsforum/redzone-ai-monitor/releases/tag/v1.2.0-rc.1)
-- [Mac download: Exposure-Zone-Monitoring-macos-arm64.dmg](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/Exposure-Zone-Monitoring-macos-arm64.dmg)
-- [Windows download: Exposure-Zone-Monitoring-Windows-x64.zip](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/Exposure-Zone-Monitoring-Windows-x64.zip)
-- [SHA256SUMS.txt](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/SHA256SUMS.txt)
-- [build-manifest.json](https://github.com/dropsforum/redzone-ai-monitor/releases/download/v1.2.0-rc.1/build-manifest.json)
-
-Use the preview tag above: GitHub's latest stable release remains the older **v1.1.0 (December 2025)** and is not this native preview. Packaged apps require no separate Python installation. Intel Macs and Windows ARM are unsupported and untested for this release; Windows hardware validation is not claimed.
-
-On Mac, open the DMG and copy **Exposure Zone Monitoring.app** to Applications. Developer ID signing is used when an identity is available; this preview is **not Apple-notarized**. On Windows, extract the entire ZIP, then launch **ExposureZoneMonitoring.exe** inside the **Exposure Zone Monitoring** folder; keep its bundled libraries alongside it. The Windows preview is unsigned and may trigger SmartScreen. Confirm the source and checksum and follow your organization's security policy; do not disable protections.
+Ready-built apps are linked in [Download the App](#download-the-app) above. Consult the [installation guide](docs/desktop-releases.md) and exact release notes for verification and limitations. Windows hardware validation is not claimed.
 
 Model weights are not committed or packaged. On first use, the native app downloads the selected approved model (`yolo26n-seg.pt` by default, or `yolo26n.pt` detection) from official Ultralytics `v8.4.0` assets and verifies its pinned SHA-256 before an atomic move into the user cache. Mac cache: `~/Library/Caches/redzone-ai-monitor/models`; Windows cache: `%LOCALAPPDATA%\DROPS Red Zone Monitoring\models`. Internet is needed initially; a verified cached model can subsequently run offline. See [desktop release instructions](docs/desktop-releases.md) for checksums, readiness messages, local records and the scope of verification.
 
